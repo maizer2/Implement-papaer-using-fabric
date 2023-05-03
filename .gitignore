@@ -1,2 +1,5 @@
 data
 *.pyc
+events*
+*.yaml
+*.ckpt
