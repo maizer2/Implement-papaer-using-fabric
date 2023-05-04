@@ -1,0 +1,12 @@
+model:
+  target: models.mlp.MLP.LitMultiLayerPerceptron
+  params:
+    lr: 1e-3
+    in_features: 1024
+    out_features: 10
+  
+data:
+  image_mean: 0.5
+  image_std: 0.5
+  image_channel: 1
+  image_size: 32
