@@ -2,6 +2,12 @@ import lightning.pytorch as pl
 import torch.nn as nn
 import torch.optim as toptim
 
+'''
+MLP
+Input 1x32x32
+Output 10
+'''
+
 class SinglePerceptron(nn.Module):
     def __init__(self, in_features, out_features, dropout:bool = True, activation: nn = nn.ReLU()):
         super().__init__()
@@ -18,47 +24,47 @@ class SinglePerceptron(nn.Module):
     
     def forward(self, x):
         return self.layer(x)
-    
+
+ 
 class LitMultiLayerPerceptron(pl.LightningModule):
-    def __init__(self):
+    def __init__(self, 
+                 lr = 1e-3,
+                 in_features = None,
+                 out_features = None,
+                 features = None):
         super().__init__()
-        self.lr = 1e-3
+        self.lr = lr
         self.criterion = nn.CrossEntropyLoss()
         
-        features = [1024, 512, 256, 128, 64, 32, 16, 10]
+        if features is None:
+            features = [in_features, 512, 256, 128, 64, 32, 16, out_features]
+            
         layers = []
-        
-        for feature in features:
-            if feature != 16:
-                layers.append(SinglePerceptron(feature, feature//2))
+        for idx in range(len(features) -1):
+            if features[idx] != features[-2]:
+                activation=nn.ReLU()
             else:
-                layers.append(SinglePerceptron(feature, features[-1], activation=nn.Softmax(1)))
-                break
+                activation=nn.Softmax(1)
+            layers.append(SinglePerceptron(features[idx], features[idx +1], activation=activation))
             
         self.layers = nn.Sequential(*layers)
         
-    def training_step(self, batch, batch_idx):
+        
+    def get_loss(self, batch, log_string):
         x, y = batch
         y_hat = self.layers(x.view(x.size(0), -1))
         loss = self.criterion(y_hat, y)
-        self.log("train_loss", loss, sync_dist=True)
-    
+        self.log(log_string, loss, sync_dist=True)
         return loss
+    
+    def training_step(self, batch, batch_idx):
+        return self.get_loss(batch, "train_loss")
          
     def validation_step(self, batch, batch_idx):
-        x, y = batch
-        y_hat = self.layers(x.view(x.size(0), -1))
-        loss = self.criterion(y_hat, y)
-        self.log("val_loss", loss, sync_dist=True)
+        self.get_loss(batch, "val_loss")
     
     def test_step(self, batch, batch_idx):
-        x, y = batch
-        y_hat = self.layers(x.view(x.size(0), -1))
-        loss = self.criterion(y_hat, y)
-        self.log("test_loss", loss, sync_dist=True)
-        
-        return loss
+        return self.get_loss(batch, "test_loss")
     
     def configure_optimizers(self):
-        optimizer = toptim.Adam(self.parameters(), self.lr)
-        return optimizer
+        return toptim.Adam(self.parameters(), self.lr)
