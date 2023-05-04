@@ -16,8 +16,9 @@ def get_opt():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", 
                         type=str, 
-                        default="configs/LeNet5-train.yaml", 
-                        # default="configs/MLP-train.yaml",
+                        default="configs/AlexNet.yaml",
+                        # default="configs/LeNet5.yaml", 
+                        # default="configs/MLP.yaml",
                         help="Path of model config file.")
     parser.add_argument("--dataset_path", 
                         type=str, 
@@ -25,13 +26,14 @@ def get_opt():
                         help="Path of dataset.")
     parser.add_argument("--log_path", 
                         type=str, 
-                        default="checkpoints/cnn/lenet5",
+                        default="checkpoints/cnn/alexnet",
+                        # default="checkpoints/cnn/lenet5",
                         # default="checkpoints/mlp",
                         help="Path of lightning logs.")
     parser.add_argument("--ckpt_path", 
                         type=str, 
-                        # default=None,
-                        default="checkpoints/cnn/lenet5/lightning_logs/version_37/checkpoints/epoch=199-step=50000.ckpt",
+                        default=None,
+                        # default="checkpoints/cnn/lenet5/lightning_logs/version_37/checkpoints/epoch=199-step=50000.ckpt",
                         help="Path of ckpt.")
     parser.add_argument("--num_workers", 
                         type=tuple, 
@@ -39,8 +41,12 @@ def get_opt():
                         help="Number of DataLoader worker.")
     parser.add_argument("--batch_size", 
                         type=int, 
-                        default=64, 
+                        default=256, 
                         help="Batch size.")
+    parser.add_argument("--max_epochs", 
+                        type=int, 
+                        default=200, 
+                        help="Epoch lenghts.")
     
     opt = parser.parse_args()
 
@@ -95,7 +101,7 @@ if __name__ == "__main__":
     
     model = instantiate_from_config(config.model)
     
-    trainer = pl.Trainer(max_epochs=200,
+    trainer = pl.Trainer(max_epochs=opt.max_epochs,
                          default_root_dir=opt.log_path,
                         #  callbacks=[EarlyStopping(monitor="val_loss", mode="min")]
                          )
