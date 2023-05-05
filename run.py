@@ -20,7 +20,7 @@ def get_opt():
                         # default="configs/LeNet5.yaml", 
                         # default="configs/MLP.yaml",
                         help="Path of model config file.")
-    parser.add_argument("--dataset_path", 
+    parser.add_argument("--data_path", 
                         type=str, 
                         default="data", 
                         help="Path of dataset.")
@@ -61,10 +61,10 @@ def get_dataloader(opt, config, transform=None):
                                         transforms.Resize(config["image_size"], antialias=True)
                                         ])
         
-    train_dataset = datasets.MNIST(opt.dataset_path, download=True, transform=transform)
+    train_dataset = datasets.MNIST(opt.data_path, download=True, transform=transform)
     
     train_dataset, val_dataset = data.random_split(train_dataset, [int(len(train_dataset) * 0.8), len(train_dataset) - int(len(train_dataset) * 0.8)])
-    test_dataset = datasets.MNIST(opt.dataset_path, download=True, train=False, transform=transform)
+    test_dataset = datasets.MNIST(opt.data_path, download=True, train=False, transform=transform)
     
     train_loader = data.DataLoader(train_dataset, 
                               batch_size=opt.batch_size, 
