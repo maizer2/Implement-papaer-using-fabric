@@ -26,16 +26,13 @@ LeNet5
 Input 1x32x32
 Output 10
 '''
-class LitLeNet5(pl.LightningModule):
+class LeNet5(nn.Module):
     def __init__(self,
-                 lr,
                  in_channels = None,
                  out_features = None,
                  channels = None,
                  features = None):
         super().__init__()
-        self.lr = lr
-        self.criterion = nn.CrossEntropyLoss()
         
         if channels is None:
             channels = [in_channels, 6, 16]
@@ -51,46 +48,22 @@ class LitLeNet5(pl.LightningModule):
         self.conv_layers = nn.Sequential(*conv_layers)
         self.mlp_layers = LitMultiLayerPerceptron(features=features).layers
         
-    
-    def get_loss(self, batch, log_string):
-        x, y = batch
-        y_hat = self.mlp_layers(self.conv_layers(x).view(x.size(0),-1))
-        loss = self.criterion(y_hat, y)
-        self.log(log_string, loss, sync_dist=True)
-        return loss
+    def forward(self, x):
+        return self.mlp_layers(self.conv_layers(x).view(x.size(0),-1))
         
-        
-    def training_step(self, batch, batch_idx):
-        return self.get_loss(batch, "train_loss")
-    
-    
-    def validation_step(self, batch, batch_idx):
-        self.get_loss(batch, "val_loss")
-        
-    
-    def test_step(self, batch, batch_idx):
-        return self.get_loss(batch, "test_loss")
-    
-    
-    def configure_optimizers(self):
-        return toptim.Adam(self.parameters(), self.lr)
-    
 
 '''
 AlexNet
 Input 1x277x277
 Output 10
 '''
-class LitAlexNet(pl.LightningModule):
+class LitAlexNet(nn.Module):
     def __init__(self,
-                 lr,
                  in_channels = None,
                  out_features = None,
                  channels = None,
                  features = None):
         super().__init__()
-        self.lr = lr
-        self.criterion = nn.CrossEntropyLoss()
         
         if channels is None:
             channels = [in_channels, 96, 256, 384, 384, 256]
@@ -113,38 +86,17 @@ class LitAlexNet(pl.LightningModule):
         
         self.conv_layers = nn.Sequential(*conv_layers)
         self.mlp_layers = LitMultiLayerPerceptron(features=features).layers
-        
     
-    def get_loss(self, batch, log_string):
-        x, y = batch
-        y_hat = self.mlp_layers(self.conv_layers(x).view(x.size(0),-1))
-        loss = self.criterion(y_hat, y)
-        self.log(log_string, loss, sync_dist=True)
-        return loss
-        
-        
-    def training_step(self, batch, batch_idx):
-        return self.get_loss(batch, "train_loss")
-    
-    
-    def validation_step(self, batch, batch_idx):
-        self.get_loss(batch, "val_loss")
-        
-    
-    def test_step(self, batch, batch_idx):
-        return self.get_loss(batch, "test_loss")
-    
-    
-    def configure_optimizers(self):
-        return toptim.Adam(self.parameters(), self.lr)
-    
-    
+    def forward(self, x):
+        return self.mlp_layers(self.conv_layers(x).view(x.size(0),-1))
+       
+           
 '''
 VGGNet
 Input 1x224x224
 Output 10
 '''
-class LitVGGNet(pl.LightningModule):
+class LitVGGNet(nn.Module):
     def get_vgg_config(vgg_layers):
 
         if vgg_layers == 13:
@@ -162,15 +114,12 @@ class LitVGGNet(pl.LightningModule):
         return vgg_config
     
     def __init__(self,
-                 lr,
                  in_channels = None,
                  out_features = None,
                  vgg_layers = None,
                  channels = None,
                  features = None):
         super().__init__()
-        self.lr = lr
-        self.criterion = nn.CrossEntropyLoss()
         
         if channels is None:
             channels = [in_channels, 96, 256, 384, 384, 256]
@@ -193,11 +142,24 @@ class LitVGGNet(pl.LightningModule):
         
         self.conv_layers = nn.Sequential(*conv_layers)
         self.mlp_layers = LitMultiLayerPerceptron(features=features).layers
-        
     
+    def get_loss(self, x):
+        return self.mlp_layers(self.conv_layers(x).view(x.size(0),-1))
+       
+           
+class LitCNN(pl.LightningModule):
+    def __init__(self, 
+                 lr,
+                 model_args,
+                 criterion = nn.CrossEntropyLoss()):
+        super().__init__()
+        self.lr = lr
+        self.criterion = criterion
+        self.model = LeNet5(**model_args)
+        
     def get_loss(self, batch, log_string):
         x, y = batch
-        y_hat = self.mlp_layers(self.conv_layers(x).view(x.size(0),-1))
+        y_hat = self.model(x)
         loss = self.criterion(y_hat, y)
         self.log(log_string, loss, sync_dist=True)
         return loss
@@ -217,3 +179,4 @@ class LitVGGNet(pl.LightningModule):
     
     def configure_optimizers(self):
         return toptim.Adam(self.parameters(), self.lr)
+    
