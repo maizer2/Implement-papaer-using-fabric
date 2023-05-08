@@ -16,7 +16,8 @@ def get_opt():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", 
                         type=str, 
-                        default="configs/ResNet.yaml",
+                        default="configs/VanilaGAN.yaml",
+                        # default="configs/ResNet.yaml",
                         # default="configs/VGGNet.yaml",
                         # default="configs/AlexNet.yaml",
                         # default="configs/LeNet5.yaml", 
@@ -28,7 +29,8 @@ def get_opt():
                         help="Path of dataset.")
     parser.add_argument("--log_path", 
                         type=str, 
-                        default="checkpoints/cnn/resnet",
+                        default="checkpoints/gan/vanilagan",
+                        # default="checkpoints/cnn/resnet",
                         # default="checkpoints/cnn/vggnet",
                         # default="checkpoints/cnn/alexnet",
                         # default="checkpoints/cnn/lenet5",

@@ -1,0 +1,19 @@
+model:
+  target: models.gan.GAN.LitGAN
+  params:
+    lr: 1e-3
+    latent_dim: 100
+    G_name: VanilaGenerator
+    G_args:
+      latent_dim: 100
+      out_features: 784
+    D_name: VanilaDiscriminator
+    D_args:
+      in_features: 784
+      out_features: 1
+  
+data:
+  image_mean: 0.5
+  image_std: 0.5
+  image_channel: 1
+  image_size: 28

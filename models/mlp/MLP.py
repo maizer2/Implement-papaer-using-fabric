@@ -31,6 +31,8 @@ class LitMultiLayerPerceptron(pl.LightningModule):
                  lr = 1e-3,
                  in_features = None,
                  out_features = None,
+                 hidden_activation = nn.ReLU(),
+                 final_activation = nn.Softmax(1),
                  features = None):
         super().__init__()
         self.lr = lr
@@ -42,9 +44,9 @@ class LitMultiLayerPerceptron(pl.LightningModule):
         layers = []
         for idx in range(len(features) -1):
             if features[idx] != features[-2]:
-                activation=nn.ReLU()
+                activation=hidden_activation
             else:
-                activation=nn.Softmax(1)
+                activation=final_activation
             layers.append(SinglePerceptron(features[idx], features[idx +1], activation=activation))
             
         self.layers = nn.Sequential(*layers)
