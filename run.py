@@ -16,7 +16,9 @@ def get_opt():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", 
                         type=str, 
-                        default="configs/AlexNet.yaml",
+                        default="configs/ResNet.yaml",
+                        # default="configs/VGGNet.yaml",
+                        # default="configs/AlexNet.yaml",
                         # default="configs/LeNet5.yaml", 
                         # default="configs/MLP.yaml",
                         help="Path of model config file.")
@@ -26,14 +28,16 @@ def get_opt():
                         help="Path of dataset.")
     parser.add_argument("--log_path", 
                         type=str, 
-                        default="checkpoints/cnn/alexnet",
+                        default="checkpoints/cnn/resnet",
+                        # default="checkpoints/cnn/vggnet",
+                        # default="checkpoints/cnn/alexnet",
                         # default="checkpoints/cnn/lenet5",
                         # default="checkpoints/mlp",
                         help="Path of lightning logs.")
     parser.add_argument("--ckpt_path", 
                         type=str, 
                         default=None,
-                        # default="checkpoints/cnn/lenet5/lightning_logs/version_37/checkpoints/epoch=199-step=50000.ckpt",
+                        # default="checkpoints/cnn/vggnet/lightning_logs/version_0/checkpoints/epoch=2-step=750.ckpt",
                         help="Path of ckpt.")
     parser.add_argument("--num_workers", 
                         type=tuple, 
@@ -41,7 +45,7 @@ def get_opt():
                         help="Number of DataLoader worker.")
     parser.add_argument("--batch_size", 
                         type=int, 
-                        default=256, 
+                        default=64, 
                         help="Batch size.")
     parser.add_argument("--max_epochs", 
                         type=int, 
