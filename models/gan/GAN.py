@@ -22,10 +22,11 @@ class VanilaGenerator(nn.Module):
         
         self.mlp_layers = LitMultiLayerPerceptron(features=features,
                                                   hidden_activation=nn.LeakyReLU(0.02), 
-                                                  final_activation=nn.Tanh()).layers        
+                                                  final_activation=nn.Tanh()).layers
         
     def forward(self, z):
         return self.mlp_layers(z)
+
 
 class VanilaDiscriminator(nn.Module):
     def __init__(self,
@@ -44,6 +45,7 @@ class VanilaDiscriminator(nn.Module):
     def forward(self, x):
         return self.mlp_layers(x)
     
+    
 class LitGAN(pl.LightningModule):
     def __init__(self,
                  lr,
@@ -52,46 +54,61 @@ class LitGAN(pl.LightningModule):
                  D_name, D_args,
                  criterion = nn.BCELoss()):
         super().__init__()
+        self.automatic_optimization = False
         self.lr = lr
         self.latent_dim = latent_dim
         self.criterion = criterion
         self.G = getattr(importlib.import_module(__name__), G_name)(**G_args)
         self.D = getattr(importlib.import_module(__name__), D_name)(**D_args)
+    
+    
+    def get_G_loss(self, batch_size):
+        z = torch.randn(batch_size, self.latent_dim).cuda()
+        fake = self.G(z)
         
+        label_real = torch.ones(batch_size, 1).cuda()
+        
+        pred_fake = self.D(fake)
+        return self.criterion(pred_fake, label_real)
+        
+        
+    def get_D_loss(self, batch_size, real):
+        z = torch.randn(batch_size, self.latent_dim).cuda()
+        fake = self.G(z).detach()
+        
+        label_real = torch.ones(batch_size, 1).cuda()
+        label_fake = torch.zeros(batch_size, 1).cuda()
+        
+        pred_real = self.D(real)
+        pred_fake = self.D(fake)
+        
+        return ( self.criterion(pred_real, label_real) + self.criterion(pred_fake, label_fake) ) / 2
+    
+    
     def get_loss(self, batch, log_g_string, log_d_string):
         optim_g, optim_d = self.optimizers()
+        real, _ = batch
+        batch_size = real.size(0)
         
         # Training Generator
         self.toggle_optimizer(optim_g)
         
-        real, _ = batch
-        z = torch.randn(self.latent_dim)
-        fake = self.G(z)
-        
-        label_real = torch.ones_like(fake)
-        label_fake = torch.zeros_like(fake)
-        
-        pred_real = self.D(real)
-        pred_fake = self.D(fake)
-        
-        loss_g = self.criterion(pred_fake, label_real)
+        loss_g = self.get_G_loss(batch_size)
+        print(loss_g)
         self.manual_backward(loss_g)
         optim_g.step()
         optim_g.zero_grad()
+        
         self.untoggle_optimizer(optim_g)
         
         # Training Discriminator
         self.toggle_optimizer(optim_d)
-        z = torch.randn(self.latent_dim)
-        fake = self.G(z).detach()
         
-        pred_real = self.D(real)
-        pred_fake = self.D(fake)
-        
-        loss_d = ( self.criterion(pred_real, label_real) + self.criterion(pred_fake, label_fake) ) / 2
+        loss_d = self.get_D_loss(batch_size, real)
         self.manual_backward(loss_d)
         optim_d.step()
         optim_d.zero_grad()
+        
         self.untoggle_optimizer(optim_d)
         
         self.log(log_g_string, loss_g, prog_bar=True)
@@ -112,6 +129,12 @@ class LitGAN(pl.LightningModule):
     
     def configure_optimizers(self):
         optim_g = toptim.Adam(self.G.parameters(), self.lr)
+        lr_scheduler_g = torch.optim.lr_scheduler.StepLR(optim_g, step_size=1)
         optim_d = toptim.Adam(self.D.parameters(), self.lr)
-        return [optim_g, optim_d], []
+        lr_scheduler_d = torch.optim.lr_scheduler.StepLR(optim_d, step_size=1)
+        return [optim_g, optim_d], [lr_scheduler_g, lr_scheduler_d]
+        # return optim_g, optim_d
     
+    
+    # def predict_step(self, batch):
+        

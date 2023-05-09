@@ -1,6 +1,7 @@
 import importlib, os, argparse
 from omegaconf import OmegaConf
 
+import lightning as L
 import lightning.pytorch as pl
 from lightning.pytorch.callbacks.early_stopping import EarlyStopping
 
@@ -109,6 +110,7 @@ if __name__ == "__main__":
     
     trainer = pl.Trainer(max_epochs=opt.max_epochs,
                          default_root_dir=opt.log_path,
+                         num_nodes=1
                         #  callbacks=[EarlyStopping(monitor="val_loss", mode="min")]
                          )
     
