@@ -45,15 +45,14 @@ class VanilaDiscriminator(nn.Module):
     def forward(self, x):
         return self.mlp_layers(x)
     
-    
-class LitGAN(pl.LightningModule):
-    def __init__(self,
-                 lr,
-                 latent_dim,
+
+class VanilaGAN(nn.Module):
+    def __init__(self, 
+                 lr, 
+                 latent_dim, 
                  G_name, G_args,
                  D_name, D_args,
                  criterion = nn.BCELoss()):
-        super().__init__()
         self.automatic_optimization = False
         self.lr = lr
         self.latent_dim = latent_dim
@@ -67,34 +66,47 @@ class LitGAN(pl.LightningModule):
         fake = self.G(z)
         
         label_real = torch.ones(batch_size, 1).cuda()
-        
         pred_fake = self.D(fake)
-        return self.criterion(pred_fake, label_real)
+        
+        loss_g = self.criterion(pred_fake, label_real)
+        return loss_g.requires_grad_(True)
         
         
     def get_D_loss(self, batch_size, real):
+        real = real.view(batch_size, -1)
         z = torch.randn(batch_size, self.latent_dim).cuda()
         fake = self.G(z).detach()
         
         label_real = torch.ones(batch_size, 1).cuda()
         label_fake = torch.zeros(batch_size, 1).cuda()
-        
         pred_real = self.D(real)
         pred_fake = self.D(fake)
         
-        return ( self.criterion(pred_real, label_real) + self.criterion(pred_fake, label_fake) ) / 2
+        loss_d = ( self.criterion(pred_real, label_real).requires_grad_(True) + self.criterion(pred_fake, label_fake).requires_grad_(True) ) / 2
+        return loss_d.requires_grad_(True)
     
     
+    
+class LitGAN(pl.LightningModule):
+    def __init__(self,
+                 lr,
+                 latent_dim,
+                 G_name, G_args,
+                 D_name, D_args,
+                 criterion = nn.BCELoss()):
+        super().__init__()
+        
     def get_loss(self, batch, log_g_string, log_d_string):
         optim_g, optim_d = self.optimizers()
         real, _ = batch
         batch_size = real.size(0)
         
+        
         # Training Generator
         self.toggle_optimizer(optim_g)
         
         loss_g = self.get_G_loss(batch_size)
-        print(loss_g)
+        self.log(log_g_string, loss_g, prog_bar=True, prog_dist=True)
         self.manual_backward(loss_g)
         optim_g.step()
         optim_g.zero_grad()
@@ -105,14 +117,13 @@ class LitGAN(pl.LightningModule):
         self.toggle_optimizer(optim_d)
         
         loss_d = self.get_D_loss(batch_size, real)
+        self.log(log_d_string, loss_d, prog_bar=True, prog_dist=True)
         self.manual_backward(loss_d)
         optim_d.step()
         optim_d.zero_grad()
         
         self.untoggle_optimizer(optim_d)
         
-        self.log(log_g_string, loss_g, prog_bar=True)
-        self.log(log_d_string, loss_d, prog_bar=True)
         
         
     def training_step(self, batch, batch_idx):
@@ -133,8 +144,6 @@ class LitGAN(pl.LightningModule):
         optim_d = toptim.Adam(self.D.parameters(), self.lr)
         lr_scheduler_d = torch.optim.lr_scheduler.StepLR(optim_d, step_size=1)
         return [optim_g, optim_d], [lr_scheduler_g, lr_scheduler_d]
-        # return optim_g, optim_d
     
     
     # def predict_step(self, batch):
-        
