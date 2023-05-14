@@ -6,9 +6,35 @@ import torch.nn as nn
 import torch.optim as toptim
 import torch.nn.functional as F
 
-from models.mlp.MLP import LitMultiLayerPerceptron
+from models.mlp.MLP import MultiLayerPerceptron
+
+conv_configure= namedtuple("conv_config", ["model", 
+                                           "in_channels", "out_channels", 
+                                           "k", "s", "p", 
+                                           "normalize", "activation", "pooling"])
 
 
+class DeConvolution_layer(nn.Module):
+    def __init__(self, in_channels, out_channels, k, s, p, normalize=None, activation=None, pooling=None) -> None:
+        super().__init__()
+        layer = [
+            nn.ConvTranspose2d(in_channels, out_channels, k, s, p)
+        ]
+        if normalize is not None:
+            layer.append(normalize)
+        
+        if activation is not None:
+            layer.append(activation)
+        
+        if pooling is not None:
+            layer.append(pooling)
+        
+        self.layer = nn.Sequential(*layer)
+        
+    def forward(self, x):
+        return self.layer(x)
+    
+    
 class Convolution_layer(nn.Module):
     def __init__(self, in_channels, out_channels, k, s, p, normalize=None, activation=None, pooling=None):
         super().__init__()
@@ -29,16 +55,59 @@ class Convolution_layer(nn.Module):
     def forward(self, x):
         return self.layer(x)
    
-    
+
+class BasicConvNet(nn.Module):
+    def __init__(self, img_size, out_channels, conv_config = None, output_shape = "image"):
+        super().__init__()
+        self.img_size = img_size
+        self.output_shape = output_shape
+        self.out_channels = out_channels
+        if conv_config is None:
+            conv_config = conv_configure(
+                model=Convolution_layer,
+                in_channels= [in_channels,  1024, 512, 256, 128],
+                out_channels=[1024,         512,  256, 128, out_channels],
+                k=[5 for _ in range(5)],
+                s=[1 for _ in range(5)],
+                p=[0 for _ in range(5)],
+                normalize=[None for _ in range(5)],
+                activation=[nn.ReLU() for _ in range(5)],
+                pooling=[None for _ in range(5)]           
+            )
+        
+        layers = []
+        for idx in range(len(conv_config.in_channels)):
+            layers.append(conv_config.model(conv_config.in_channels[idx], 
+                                                 conv_config.out_channels[idx], 
+                                                 conv_config.k[idx], 
+                                                 conv_config.s[idx], 
+                                                 conv_config.p[idx],
+                                                 conv_config.normalize[idx],
+                                                 conv_config.activation[idx],
+                                                 conv_config.pooling[idx]))
+        
+        self.layers = nn.Sequential(*layers)
+        
+    def forward(self, x):
+        if self.output_shape == "image":
+            out = self.layers(x).view(x.size(0), self.out_channels, self.img_size, self.img_size)
+        else:
+            out = self.layers(x)
+        return out
+
+
 '''
 LeNet5
 Input 1x32x32
-Output 10
+Output out_features
 '''
 class LeNet5(nn.Module):
     def __init__(self,
                  in_channels = None,
                  out_features = None,
+                 hidden_activation = nn.ReLU(),
+                 final_activation = nn.Softmax(1),
+                 pooling = nn.AvgPool2d(2),
                  channels = None,
                  features = None):
         super().__init__()
@@ -51,11 +120,16 @@ class LeNet5(nn.Module):
         conv_layers = []
         for idx in range(len(channels) -1):
             k, s, p = 5, 1, 0
-            pooling = nn.AvgPool2d(2)
-            conv_layers.append(Convolution_layer(channels[idx], channels[idx+1], k, s, p, activation=nn.ReLU(), pooling=pooling))
+            conv_layers.append(Convolution_layer(channels[idx], 
+                                                 channels[idx+1], 
+                                                 k, s, p, 
+                                                 activation=hidden_activation, 
+                                                 pooling=pooling))
         
         self.conv_layers = nn.Sequential(*conv_layers)
-        self.mlp_layers = LitMultiLayerPerceptron(features=features).layers
+        self.mlp_layers = MultiLayerPerceptron(hidden_activation=hidden_activation,
+                                               final_activation=final_activation,
+                                               features=features)
         
     def forward(self, x):
         return self.mlp_layers(self.conv_layers(x).view(x.size(0),-1))
@@ -70,6 +144,9 @@ class AlexNet(nn.Module):
     def __init__(self,
                  in_channels = None,
                  out_features = None,
+                 hidden_activation = nn.ReLU(),
+                 final_activation = nn.Softmax(1),
+                 pooling=nn.MaxPool2d(3, 2, 0),
                  channels = None,
                  features = None):
         super().__init__()
@@ -94,7 +171,9 @@ class AlexNet(nn.Module):
             conv_layers.append(Convolution_layer(channels[idx], channels[idx+1], k, s, p, activation=nn.ReLU(), pooling=pooling))
         
         self.conv_layers = nn.Sequential(*conv_layers)
-        self.mlp_layers = LitMultiLayerPerceptron(features=features).layers
+        self.mlp_layers = MultiLayerPerceptron(hidden_activation=hidden_activation,
+                                               final_activation=final_activation,
+                                               features=features)
     
     def forward(self, x):
         return self.mlp_layers(self.conv_layers(x).view(x.size(0),-1))
@@ -124,6 +203,8 @@ class VGGNet(nn.Module):
     def __init__(self,
                  in_channels = None,
                  out_features = None,
+                 hidden_activation = nn.ReLU(),
+                 final_activation = nn.Softmax(1),
                  vgg_layers = None,
                  features = None,
                  batch_norm = True):
@@ -154,7 +235,9 @@ class VGGNet(nn.Module):
             in_channels = _out_channel
         
         self.conv_layers = nn.Sequential(*conv_layers)
-        self.mlp_layers = LitMultiLayerPerceptron(features=features).layers
+        self.mlp_layers = MultiLayerPerceptron(hidden_activation=hidden_activation,
+                                               final_activation=final_activation,
+                                               features=features)
     
     def forward(self, x):
         return self.mlp_layers(self.conv_layers(x).view(x.size(0),-1))
@@ -291,6 +374,8 @@ class ResNet(nn.Module):
     def __init__(self,
                  in_channels,
                  out_features,
+                 hidden_activation = nn.ReLU(),
+                 final_activation = nn.Softmax(1),
                  res_layers = 18,
                  features = None):
         super().__init__()
@@ -301,7 +386,13 @@ class ResNet(nn.Module):
         if features is None:
             features = [512 * block.expansion, out_features]
         
-        conv_layers = [Convolution_layer(in_channels, self.in_channels, 7, 2, 3, nn.BatchNorm2d(self.in_channels), nn.ReLU(), nn.MaxPool2d(3, 2, 1))]
+        conv_layers = [Convolution_layer(in_channels, 
+                                         self.in_channels, 
+                                         7, 2, 3, 
+                                         nn.BatchNorm2d(self.in_channels), 
+                                         hidden_activation, 
+                                         nn.MaxPool2d(3, 2, 1))]
+        
         for idx in range(len(channels)):
             stride = 1 if idx == 0 else 2
 
@@ -310,7 +401,9 @@ class ResNet(nn.Module):
         conv_layers.append(nn.AdaptiveAvgPool2d((1, 1)))
         
         self.conv_layers = nn.Sequential(*conv_layers)
-        self.mlp_layers = LitMultiLayerPerceptron(features=features).layers
+        self.mlp_layers = MultiLayerPerceptron(hidden_activation=hidden_activation,
+                                               final_activation=final_activation,
+                                               features=features)
         
         
     def forward(self, x):
@@ -327,7 +420,12 @@ class LitCNN(pl.LightningModule):
         self.lr = lr
         self.criterion = criterion
         self.model = getattr(importlib.import_module(__name__), model_name)(**model_args)
-        
+    
+    
+    def forward(self, x):
+        return self.model(x)
+    
+    
     def get_loss(self, batch, log_string):
         x, y = batch
         y_hat = self.model(x)

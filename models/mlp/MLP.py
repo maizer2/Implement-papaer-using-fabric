@@ -1,3 +1,5 @@
+import importlib
+
 import lightning.pytorch as pl
 import torch.nn as nn
 import torch.optim as toptim
@@ -9,7 +11,7 @@ Output 10
 '''
 
 class SinglePerceptron(nn.Module):
-    def __init__(self, in_features, out_features, dropout:bool = True, activation: nn = nn.ReLU()):
+    def __init__(self, in_features, out_features, dropout:bool = True, normalize = None, activation: nn = nn.ReLU()):
         super().__init__()
         layer = [
             nn.Linear(in_features, out_features)
@@ -18,25 +20,27 @@ class SinglePerceptron(nn.Module):
         if dropout:
             layer.append(nn.Dropout())
         
-        layer.append(activation)
+        if normalize is not None:
+            layer.append(normalize(out_features, 0.8))
+            
+        if activation is not None:
+            layer.append(activation)
         
         self.layer = nn.Sequential(*layer)
     
     def forward(self, x):
         return self.layer(x)
 
- 
-class LitMultiLayerPerceptron(pl.LightningModule):
+
+class MultiLayerPerceptron(nn.Module):
     def __init__(self, 
-                 lr = 1e-3,
                  in_features = None,
                  out_features = None,
+                 normalize = None,
                  hidden_activation = nn.ReLU(),
                  final_activation = nn.Softmax(1),
                  features = None):
         super().__init__()
-        self.lr = lr
-        self.criterion = nn.CrossEntropyLoss()
         
         if features is None:
             features = [in_features, 512, 256, 128, 64, 32, 16, out_features]
@@ -47,14 +51,31 @@ class LitMultiLayerPerceptron(pl.LightningModule):
                 activation=hidden_activation
             else:
                 activation=final_activation
-            layers.append(SinglePerceptron(features[idx], features[idx +1], activation=activation))
+            layers.append(SinglePerceptron(features[idx], features[idx +1], normalize=normalize, activation=activation))
             
         self.layers = nn.Sequential(*layers)
         
+    
+    def forward(self, x):
+        return self.layers(x.view(x.size(0), -1))
+    
+ 
+class LitMLP(pl.LightningModule):
+    def __init__(self, 
+                 lr,
+                 model_name,
+                 model_args):
+        super().__init__()
+        self.lr = lr
+        self.criterion = nn.CrossEntropyLoss()
+        self.model = getattr(importlib.import_module(__name__), model_name)(**model_args)
         
+    def forward(self, x):
+        return self.model(x)
+    
     def get_loss(self, batch, log_string):
         x, y = batch
-        y_hat = self.layers(x.view(x.size(0), -1))
+        y_hat = self.model(x)
         loss = self.criterion(y_hat, y)
         self.log(log_string, loss, sync_dist=True)
         return loss
