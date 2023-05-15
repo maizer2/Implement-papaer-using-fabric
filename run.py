@@ -19,7 +19,9 @@ def get_opt():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", 
                         type=str, 
-                        default="configs/gan/CGAN.yaml",
+                        default="configs/gan/WGAN_GP.yaml",
+                        # default="configs/gan/WGAN.yaml",
+                        # default="configs/gan/CGAN.yaml",
                         # default="configs/gan/DCGAN.yaml",
                         # default="configs/gan/VanilaGAN.yaml",
                         # default="configs/cnn/ResNet.yaml",
@@ -108,7 +110,8 @@ if __name__ == "__main__":
     trainer = pl.Trainer(max_epochs=opt.max_epochs,
                          default_root_dir=get_log_path(config),
                          num_nodes=1,
-                         strategy='ddp_find_unused_parameters_true'
+                         strategy='ddp_find_unused_parameters_true',
+                         devices=1
                         #  callbacks=[EarlyStopping(monitor="val_loss", mode="min")]
                          )
     

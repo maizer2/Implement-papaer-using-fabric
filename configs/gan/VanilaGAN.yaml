@@ -1,7 +1,8 @@
 model:
   target: models.gan.GAN.LitGAN
   params:
-    lr: 1e-3
+    optim_name: Adam
+    lr: 0.0002
     model_name: VanilaGAN
     model_args:
       latent_dim: 100

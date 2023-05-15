@@ -1,6 +1,7 @@
 model:
   target: models.mlp.MLP.LitMLP
   params:
+    optim_name: Adam
     lr: 1e-3
     model_name: MultiLayerPerceptron
     model_args:

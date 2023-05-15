@@ -1,14 +1,13 @@
 model:
   target: models.gan.GAN.LitGAN
   params:
-    optim_name: Adam
-    lr: 0.0002
-    model_name: DCGAN
+    optim_name: RMSprop
+    lr: 0.00005
+    model_name: WGAN_GP
     model_args:
       latent_dim: 100
       image_channel: 1
       image_size: 64
-  
 data:
   image_mean: 0.5
   image_std: 0.5

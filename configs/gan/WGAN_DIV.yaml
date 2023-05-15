@@ -3,12 +3,11 @@ model:
   params:
     optim_name: Adam
     lr: 0.0002
-    model_name: DCGAN
+    model_name: WGAN_DIV
     model_args:
       latent_dim: 100
       image_channel: 1
       image_size: 64
-  
 data:
   image_mean: 0.5
   image_std: 0.5

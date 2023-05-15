@@ -19,14 +19,14 @@ conv_configure= namedtuple("conv_config", ["model",
                                            "normalize", "activation", "pooling"])
 
 
-def get_grid(tensor, image_shape = None):
+def get_grid(tensor, image_shape):
         
     if len(tensor.shape) == 2:
         tensor = tensor.view(tensor.size(0), image_shape[0], image_shape[1], image_shape[2])
     
     return make_grid(tensor, normalize=True)
-    
-    
+
+
 class VanilaGAN(nn.Module):
     def __init__(self, 
                  latent_dim, 
@@ -47,7 +47,7 @@ class VanilaGAN(nn.Module):
                                       features=[out_features, 256, 512, 1024, 1])
     
     
-    def get_G_loss(self, batch_size):
+    def get_G_loss(self, batch_size, epoch):
         z = torch.randn(batch_size, self.latent_dim).cuda()
         fake = self.G(z)
         
@@ -58,7 +58,7 @@ class VanilaGAN(nn.Module):
         return loss_g.requires_grad_(True)
         
         
-    def get_D_loss(self, batch_size, real):
+    def get_D_loss(self, batch_size, epoch, real):
         real = real.view(batch_size, -1)
         z = torch.randn(batch_size, self.latent_dim).cuda()
         fake = self.G(z).detach()
@@ -115,7 +115,7 @@ class DCGAN(nn.Module):
                               output_shape="scalar",
                               out_channels=1)
     
-    def get_G_loss(self, batch_size):
+    def get_G_loss(self, batch_size, epoch):
         self.batch_size = batch_size
         z = torch.randn(batch_size, self.latent_dim, 1, 1).cuda()
         fake = self.G(z)
@@ -126,7 +126,7 @@ class DCGAN(nn.Module):
         return loss_g.requires_grad_(True)
         
         
-    def get_D_loss(self, batch_size, real):
+    def get_D_loss(self, batch_size, epoch, real):
         z = torch.randn(batch_size, self.latent_dim, 1, 1).cuda()
         fake = self.G(z).detach()
         
@@ -166,7 +166,7 @@ class CGAN(nn.Module):
                                       features=[image_feature + label_number, 512, 512, 512, 1])
     
     
-    def get_G_loss(self, batch_size):
+    def get_G_loss(self, batch_size, epoch):
         self.batch_size = batch_size
         z = torch.randn(batch_size, self.latent_dim).cuda()
         condition = self.embedding(torch.randint(0, 9, (batch_size, )).cuda())
@@ -182,7 +182,7 @@ class CGAN(nn.Module):
         return loss_g.requires_grad_(True)
         
         
-    def get_D_loss(self, batch_size, real):
+    def get_D_loss(self, batch_size, epoch, real):
         z = torch.randn(batch_size, self.latent_dim).cuda()
         condition = self.embedding(torch.randint(0, 9, (batch_size, )).cuda())
         z_c = torch.cat((z, condition), -1)
@@ -206,19 +206,262 @@ class CGAN(nn.Module):
         z_c = torch.cat((z, condition), -1)
         return self.G(z_c)
     
+
+class WGAN(nn.Module):
+    def __init__(self, 
+                 latent_dim, 
+                 image_channel,
+                 image_size):
+        super().__init__()
+        self.latent_dim = latent_dim
+        self.image_shape = (image_channel, image_size, image_size)
+        
+        self.G = BasicConvNet(conv_config=conv_configure(model=DeConvolution_layer,
+                                                         in_channels=[latent_dim, 1024, 512, 256, 128],
+                                                         out_channels=[1024, 512, 256, 128, image_channel],
+                                                         k=[4 for _ in range(5)],
+                                                         s=[1,2,2,2,2],
+                                                         p=[0,1,1,1,1],
+                                                         normalize=[nn.BatchNorm2d(1024), nn.BatchNorm2d(512), nn.BatchNorm2d(256), nn.BatchNorm2d(128), None],
+                                                         activation=[nn.ReLU(), nn.ReLU(), nn.ReLU(), nn.ReLU(), nn.Tanh()],
+                                                         pooling=[None for _ in range(5)]
+                                                         ),
+                              img_size=image_size,
+                              output_shape="image",
+                              out_channels=1)
+        
+        self.D = BasicConvNet(conv_config=conv_configure(model=Convolution_layer,
+                                                         in_channels=[image_channel, 64, 128, 256, 512],
+                                                         out_channels=[64, 128, 256, 512, 1],
+                                                         k=[4 for _ in range(5)],
+                                                         s=[2,2,2,2,1],
+                                                         p=[1,1,1,1,0],
+                                                         normalize=[None, nn.BatchNorm2d(128), nn.BatchNorm2d(256), nn.BatchNorm2d(512), None],
+                                                         activation=[nn.LeakyReLU(), nn.LeakyReLU(), nn.LeakyReLU(), nn.LeakyReLU(), nn.Sigmoid()],
+                                                         pooling=[None for _ in range(5)]
+                                                         ),
+                              img_size=image_size,
+                              output_shape="scalar",
+                              out_channels=1)
+    
+    
+    def get_G_loss(self, batch_size, epoch):
+        if epoch % 5 == 0:
+            self.batch_size = batch_size
+            z = torch.randn(batch_size, self.latent_dim, 1, 1).cuda()
+            fake = self.G(z)
+            
+            pred_fake = self.D(fake).view(batch_size, -1)
+            
+            self.loss_g = -torch.mean(pred_fake)
+            return self.loss_g.requires_grad_(True)
+        else:
+            return self.loss_g
+        
+        
+    def get_D_loss(self, batch_size, epoch, real):
+        z = torch.randn(batch_size, self.latent_dim, 1, 1).cuda()
+        fake = self.G(z).detach()
+        
+        pred_real = self.D(real).view(batch_size, -1)
+        pred_fake = self.D(fake).view(batch_size, -1)
+        
+        loss_d = -torch.mean(pred_real) + torch.mean(pred_fake)
+        return loss_d.requires_grad_(True)
+
+
+    def forward(self):
+        return self.G(torch.randn(self.batch_size, self.latent_dim, 1, 1).cuda())
+    
+
+class WGAN_GP(nn.Module):
+    def __init__(self, 
+                 latent_dim, 
+                 image_channel,
+                 image_size):
+        super().__init__()
+        self.latent_dim = latent_dim
+        self.image_shape = (image_channel, image_size, image_size)
+        
+        # Loss weight for gradient penalty
+        self.lambda_gp = 10
+
+        
+        self.G = BasicConvNet(conv_config=conv_configure(model=DeConvolution_layer,
+                                                         in_channels=[latent_dim, 1024, 512, 256, 128],
+                                                         out_channels=[1024, 512, 256, 128, image_channel],
+                                                         k=[4 for _ in range(5)],
+                                                         s=[1,2,2,2,2],
+                                                         p=[0,1,1,1,1],
+                                                         normalize=[nn.BatchNorm2d(1024), nn.BatchNorm2d(512), nn.BatchNorm2d(256), nn.BatchNorm2d(128), None],
+                                                         activation=[nn.ReLU(), nn.ReLU(), nn.ReLU(), nn.ReLU(), nn.Tanh()],
+                                                         pooling=[None for _ in range(5)]
+                                                         ),
+                              img_size=image_size,
+                              output_shape="image",
+                              out_channels=1)
+        
+        self.D = BasicConvNet(conv_config=conv_configure(model=Convolution_layer,
+                                                         in_channels=[image_channel, 64, 128, 256, 512],
+                                                         out_channels=[64, 128, 256, 512, 1],
+                                                         k=[4 for _ in range(5)],
+                                                         s=[2,2,2,2,1],
+                                                         p=[1,1,1,1,0],
+                                                         normalize=[None, nn.BatchNorm2d(128), nn.BatchNorm2d(256), nn.BatchNorm2d(512), None],
+                                                         activation=[nn.LeakyReLU(), nn.LeakyReLU(), nn.LeakyReLU(), nn.LeakyReLU(), nn.Sigmoid()],
+                                                         pooling=[None for _ in range(5)]
+                                                         ),
+                              img_size=image_size,
+                              output_shape="scalar",
+                              out_channels=1)
+    
+    def compute_gp(self, real_sample, fake_sample):
+        """Calculates the gradient penalty loss for WGAN GP"""
+        # Random weight term for interpolation between real and fake samples
+        alpha = torch.randn((real_sample.size(0), 1, 1, 1), requires_grad=True).cuda()
+        # Get random interpolation between real and fake samples
+        interpolates = (alpha * real_sample + ((1 - alpha) * fake_sample))
+        d_interpolates = self.D(interpolates).requires_grad_(True)
+        fake = torch.ones((real_sample.size(0), 1, 1, 1), requires_grad=False).cuda()
+        # Get gradient w.r.t. interpolates
+        gradients = torch.autograd.grad(d_interpolates, interpolates, fake, create_graph=True)
+        
+        gradients = gradients.view(gradients.size(0), -1)
+        gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean()
+        return gradient_penalty
+
+
+    def get_G_loss(self, batch_size, epoch):
+        if epoch % 5 == 0:
+            self.batch_size = batch_size
+            z = torch.randn(batch_size, self.latent_dim, 1, 1).cuda()
+            fake = self.G(z)
+            
+            pred_fake = self.D(fake).view(batch_size, -1)
+            
+            self.loss_g = -torch.mean(pred_fake)
+            return self.loss_g.requires_grad_(True)
+        else:
+            return self.loss_g
+        
+    def get_D_loss(self, batch_size, epoch, real):
+        z = torch.randn(batch_size, self.latent_dim, 1, 1).cuda()
+        fake = self.G(z).detach()
+        
+        pred_real = self.D(real).view(batch_size, -1)
+        pred_fake = self.D(fake).view(batch_size, -1)
+        
+        gradient_penalty = self.compute_gp(real, fake)
+        
+        loss_d = -torch.mean(pred_real) + torch.mean(pred_fake) + self.lambda_gp * gradient_penalty
+        return loss_d.requires_grad_(True)
+
+
+    def forward(self):
+        return self.G(torch.randn(self.batch_size, self.latent_dim, 1, 1).cuda())
+    
+
+class WGAN_DIV(nn.Module):
+    def __init__(self, 
+                 latent_dim, 
+                 image_channel,
+                 image_size):
+        super().__init__()
+        self.latent_dim = latent_dim
+        self.image_shape = (image_channel, image_size, image_size)
+
+        self.k, self.p = 2, 6
+        
+        self.G = BasicConvNet(conv_config=conv_configure(model=DeConvolution_layer,
+                                                         in_channels=[latent_dim, 1024, 512, 256, 128],
+                                                         out_channels=[1024, 512, 256, 128, image_channel],
+                                                         k=[4 for _ in range(5)],
+                                                         s=[1,2,2,2,2],
+                                                         p=[0,1,1,1,1],
+                                                         normalize=[nn.BatchNorm2d(1024), nn.BatchNorm2d(512), nn.BatchNorm2d(256), nn.BatchNorm2d(128), None],
+                                                         activation=[nn.ReLU(), nn.ReLU(), nn.ReLU(), nn.ReLU(), nn.Tanh()],
+                                                         pooling=[None for _ in range(5)]
+                                                         ),
+                              img_size=image_size,
+                              output_shape="image",
+                              out_channels=1)
+        
+        self.D = BasicConvNet(conv_config=conv_configure(model=Convolution_layer,
+                                                         in_channels=[image_channel, 64, 128, 256, 512],
+                                                         out_channels=[64, 128, 256, 512, 1],
+                                                         k=[4 for _ in range(5)],
+                                                         s=[2,2,2,2,1],
+                                                         p=[1,1,1,1,0],
+                                                         normalize=[None, nn.BatchNorm2d(128), nn.BatchNorm2d(256), nn.BatchNorm2d(512), None],
+                                                         activation=[nn.LeakyReLU(), nn.LeakyReLU(), nn.LeakyReLU(), nn.LeakyReLU(), nn.Sigmoid()],
+                                                         pooling=[None for _ in range(5)]
+                                                         ),
+                              img_size=image_size,
+                              output_shape="scalar",
+                              out_channels=1)
+    
+    
+    def compute_div_gp(self, real, fake):
+        real_out = torch.ones(real.size(0), 1).cuda()
+        
+        real_grad = torch.autograd(self.D(real), real, real_out, create_graph=True, retain_graph=True, only_inputs=True)[0]
+        real_grad_norm = real_grad.view(real_grad.size(0), -1).pow(2).sum(1) ** (self.p / 2)
+        
+        fake_out = torch.ones(real.size(0), 1).cuda()
+        
+        fake_grad = torch.autograd(self.D(fake), fake, fake_out, create_graph=True, retain_graph=True, only_inputs=True)[0]
+        fake_grad_norm = fake_grad.view(fake_grad.size(0), -1).pow(2).sum(1) ** (self.p / 2)
+        
+        div_gp = torch.mean(real_grad_norm + fake_grad_norm) * self.k / 2
+        return div_gp
+    
+    
+    def get_G_loss(self, batch_size, epoch):
+        if epoch % 5 == 0:
+            self.batch_size = batch_size
+            z = torch.randn(batch_size, self.latent_dim, 1, 1).cuda()
+            fake = self.G(z)
+            
+            pred_fake = self.D(fake).view(batch_size, -1)
+            
+            self.loss_g = -torch.mean(pred_fake)
+            return self.loss_g.requires_grad_(True)
+        else:
+            return self.loss_g
+        
+        
+    def get_D_loss(self, batch_size, epoch, real):
+        z = torch.randn(batch_size, self.latent_dim, 1, 1).cuda()
+        fake = self.G(z).detach()
+        
+        pred_real = self.D(real).view(batch_size, -1)
+        pred_fake = self.D(fake).view(batch_size, -1)
+        
+        div_gp = self.compute_div_gradient_penalty(pred_real, pred_fake)
+        
+        loss_d = -torch.mean(pred_real) + torch.mean(pred_fake) + div_gp
+        return loss_d.requires_grad_(True)
+
+
+    def forward(self):
+        return self.G(torch.randn(self.batch_size, self.latent_dim, 1, 1).cuda())
+    
     
 class LitGAN(pl.LightningModule):
     def __init__(self,
-                 lr, 
+                 lr,
+                 optim_name: str,
                  model_name,
                  model_args):
         super().__init__()
         self.automatic_optimization = False
         self.lr = lr
+        self.optimizer = getattr(importlib.import_module("torch.optim"), optim_name)
         self.model = getattr(importlib.import_module(__name__), model_name)(**model_args)
         
         
     def get_loss(self, batch, log_g_string, log_d_string):
+        self.current_epoch
         optim_g, optim_d = self.optimizers()
         real, _ = batch
         batch_size = real.size(0)
@@ -226,7 +469,7 @@ class LitGAN(pl.LightningModule):
         # Training Generator
         self.toggle_optimizer(optim_g)
         
-        loss_g = self.model.get_G_loss(batch_size)
+        loss_g = self.model.get_G_loss(batch_size, self.current_epoch)
         self.log(log_g_string, loss_g, prog_bar=True, sync_dist=True)
         self.manual_backward(loss_g)
         optim_g.step()
@@ -237,7 +480,7 @@ class LitGAN(pl.LightningModule):
         # Training Discriminator
         self.toggle_optimizer(optim_d)
         
-        loss_d = self.model.get_D_loss(batch_size, real)
+        loss_d = self.model.get_D_loss(batch_size, self.current_epoch, real)
         self.log(log_d_string, loss_d, prog_bar=True, sync_dist=True)
         self.manual_backward(loss_d)
         optim_d.step()
@@ -248,10 +491,12 @@ class LitGAN(pl.LightningModule):
         
         
     def configure_optimizers(self):
-        optim_g = toptim.Adam(self.model.G.parameters(), self.lr)
+        optim_g = self.optimizer(self.model.G.parameters(), self.lr)
+        optim_d = self.optimizer(self.model.D.parameters(), self.lr)
+        
         lr_scheduler_g = torch.optim.lr_scheduler.StepLR(optim_g, step_size=1)
-        optim_d = toptim.Adam(self.model.D.parameters(), self.lr)
         lr_scheduler_d = torch.optim.lr_scheduler.StepLR(optim_d, step_size=1)
+        
         return [optim_g, optim_d], [lr_scheduler_g, lr_scheduler_d]
        
        

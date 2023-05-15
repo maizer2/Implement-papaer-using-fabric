@@ -1,6 +1,7 @@
 model:
   target: models.cnn.CNN.LitCNN
   params:
+    optim_name: Adam
     lr: 1e-3
     model_name: ResNet
     model_args:
