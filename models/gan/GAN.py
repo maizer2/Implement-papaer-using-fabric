@@ -7,7 +7,8 @@ from lightning.pytorch.utilities.types import STEP_OUTPUT
 import torch
 import torch.nn as nn
 import torch.optim as toptim
-import torch.nn.functional as F
+from torchvision.utils import make_grid
+from torchvision import transforms
 
 from models.cnn.CNN import BasicConvNet, DeConvolution_layer, Convolution_layer
 from models.mlp.MLP import MultiLayerPerceptron
@@ -18,19 +19,12 @@ conv_configure= namedtuple("conv_config", ["model",
                                            "normalize", "activation", "pooling"])
 
 
-def visualization(tensor, image_shape = None, out_path = None):
-    if out_path is None:
-        out_path = "./"
+def get_grid(tensor, image_shape = None):
         
-    from torchvision.utils import make_grid
-    from torchvision import transforms
-    
     if len(tensor.shape) == 2:
         tensor = tensor.view(tensor.size(0), image_shape[0], image_shape[1], image_shape[2])
     
-    image_grid = make_grid(tensor, normalize=True)
-    print(image_grid.shape)
-    transforms.ToPILImage()(image_grid).save(os.path.join(out_path, "test.png"))
+    return make_grid(tensor, normalize=True)
     
     
 class VanilaGAN(nn.Module):
@@ -207,7 +201,10 @@ class CGAN(nn.Module):
     
     
     def forward(self):
-        return self.G(torch.randn(self.batch_size, self.latent_dim).cuda())
+        z = torch.randn(self.batch_size, self.latent_dim).cuda()
+        condition = self.embedding(torch.randint(0, 9, (self.batch_size, )).cuda())
+        z_c = torch.cat((z, condition), -1)
+        return self.G(z_c)
     
     
 class LitGAN(pl.LightningModule):
@@ -216,7 +213,6 @@ class LitGAN(pl.LightningModule):
                  model_name,
                  model_args):
         super().__init__()
-        
         self.automatic_optimization = False
         self.lr = lr
         self.model = getattr(importlib.import_module(__name__), model_name)(**model_args)
@@ -269,8 +265,7 @@ class LitGAN(pl.LightningModule):
     
     
     def on_train_batch_end(self, outputs, batch: Any, batch_idx: int):
-        visualization(self.model(), self.model.image_shape, )
-        pass
+        self.logger.experiment.add_image("fake", get_grid(self.model(), self.model.image_shape), self.current_epoch)
     
     
     def validation_step(self, batch, batch_idx):
