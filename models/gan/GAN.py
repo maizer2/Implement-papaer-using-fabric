@@ -13,6 +13,8 @@ from torchvision import transforms
 from models.cnn.CNN import BasicConvNet, DeConvolution_layer, Convolution_layer
 from models.mlp.MLP import MultiLayerPerceptron
 
+device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+
 conv_configure= namedtuple("conv_config", ["model", 
                                            "in_channels", "out_channels", 
                                            "k", "s", "p", 
@@ -124,6 +126,7 @@ class DCGAN(nn.Module):
         pred_fake = self.D(fake).view(batch_size, -1)
         loss_g = self.criterion(pred_fake, label_real)
         return loss_g.requires_grad_(True)
+        # return loss_g
         
         
     def get_D_loss(self, batch_size, epoch, real):
@@ -286,7 +289,6 @@ class WGAN_GP(nn.Module):
         # Loss weight for gradient penalty
         self.lambda_gp = 10
 
-        
         self.G = BasicConvNet(conv_config=conv_configure(model=DeConvolution_layer,
                                                          in_channels=[latent_dim, 1024, 512, 256, 128],
                                                          out_channels=[1024, 512, 256, 128, image_channel],
@@ -318,14 +320,13 @@ class WGAN_GP(nn.Module):
     def compute_gp(self, real_sample, fake_sample):
         """Calculates the gradient penalty loss for WGAN GP"""
         # Random weight term for interpolation between real and fake samples
-        alpha = torch.randn((real_sample.size(0), 1, 1, 1), requires_grad=True).cuda()
+        alpha = torch.randn((real_sample.size(0), 1, 1, 1), device=device)
         # Get random interpolation between real and fake samples
         interpolates = (alpha * real_sample + ((1 - alpha) * fake_sample))
         d_interpolates = self.D(interpolates).requires_grad_(True)
-        fake = torch.ones((real_sample.size(0), 1, 1, 1), requires_grad=False).cuda()
+        fake = torch.ones((real_sample.size(0), 1, 1, 1), device=device)
         # Get gradient w.r.t. interpolates
-        gradients = torch.autograd.grad(d_interpolates, interpolates, fake, create_graph=True)
-        
+        gradients, *_ = torch.autograd.grad(d_interpolates, interpolates, fake, create_graph=True)
         gradients = gradients.view(gradients.size(0), -1)
         gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean()
         return gradient_penalty
@@ -334,8 +335,8 @@ class WGAN_GP(nn.Module):
     def get_G_loss(self, batch_size, epoch):
         if epoch % 5 == 0:
             self.batch_size = batch_size
-            z = torch.randn(batch_size, self.latent_dim, 1, 1).cuda()
-            fake = self.G(z)
+            z = torch.randn((batch_size, self.latent_dim, 1, 1), device=device, requires_grad=True)
+            fake = self.G(z).requires_grad_(True)
             
             pred_fake = self.D(fake).view(batch_size, -1)
             
@@ -345,13 +346,13 @@ class WGAN_GP(nn.Module):
             return self.loss_g
         
     def get_D_loss(self, batch_size, epoch, real):
-        z = torch.randn(batch_size, self.latent_dim, 1, 1).cuda()
-        fake = self.G(z).detach()
+        z = torch.randn((batch_size, self.latent_dim, 1, 1), device=device)
+        fake = self.G(z)
         
         pred_real = self.D(real).view(batch_size, -1)
         pred_fake = self.D(fake).view(batch_size, -1)
         
-        gradient_penalty = self.compute_gp(real, fake)
+        gradient_penalty = self.compute_gp(real.requires_grad_(True), fake.requires_grad_(True))
         
         loss_d = -torch.mean(pred_real) + torch.mean(pred_fake) + self.lambda_gp * gradient_penalty
         return loss_d.requires_grad_(True)
@@ -453,7 +454,7 @@ class LitGAN(pl.LightningModule):
                  optim_name: str,
                  model_name,
                  model_args):
-        super().__init__()
+        super().__init__()_
         self.automatic_optimization = False
         self.lr = lr
         self.optimizer = getattr(importlib.import_module("torch.optim"), optim_name)
@@ -461,7 +462,6 @@ class LitGAN(pl.LightningModule):
         
         
     def get_loss(self, batch, log_g_string, log_d_string):
-        self.current_epoch
         optim_g, optim_d = self.optimizers()
         real, _ = batch
         batch_size = real.size(0)
@@ -487,6 +487,7 @@ class LitGAN(pl.LightningModule):
         optim_d.zero_grad()
         
         self.untoggle_optimizer(optim_d)
+        
         
         
         

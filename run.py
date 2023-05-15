@@ -100,6 +100,7 @@ def get_log_path(config):
     model_name = config.model.params.model_name
     return os.path.join("checkpoints", module_name, model_name)
     
+    
 if __name__ == "__main__":
     opt = get_opt()
     config = OmegaConf.load(opt.config)
@@ -115,7 +116,7 @@ if __name__ == "__main__":
                         #  callbacks=[EarlyStopping(monitor="val_loss", mode="min")]
                          )
     
-    trainer.fit(model=model, 
+    trainer.fit(model=model,
                 train_dataloaders=train_loader,
                 val_dataloaders=val_loader,
                 ckpt_path=opt.ckpt_path
