@@ -50,10 +50,10 @@ class VanilaGAN(nn.Module):
     
     
     def get_G_loss(self, batch_size, epoch):
-        z = torch.randn(batch_size, self.latent_dim).cuda()
+        z = torch.randn((batch_size, self.latent_dim), device=device)
         fake = self.G(z)
         
-        label_real = torch.ones(batch_size, 1).cuda()
+        label_real = torch.ones((batch_size, 1), device=device)
         pred_fake = self.D(fake)
         
         loss_g = self.criterion(pred_fake, label_real)
@@ -62,11 +62,11 @@ class VanilaGAN(nn.Module):
         
     def get_D_loss(self, batch_size, epoch, real):
         real = real.view(batch_size, -1)
-        z = torch.randn(batch_size, self.latent_dim).cuda()
+        z = torch.randn((batch_size, self.latent_dim), device=device)
         fake = self.G(z).detach()
         
-        label_real = torch.ones(batch_size, 1).cuda()
-        label_fake = torch.zeros(batch_size, 1).cuda()
+        label_real = torch.ones((batch_size, 1), device=device)
+        label_fake = torch.zeros((batch_size, 1), device=device)
         pred_real = self.D(real)
         pred_fake = self.D(fake)
         
@@ -75,7 +75,7 @@ class VanilaGAN(nn.Module):
 
 
     def forward(self):
-        return self.G(torch.randn(self.batch_size, self.latent_dim).cuda())
+        return self.G(torch.randn((self.batch_size, self.latent_dim), device=device))
     
     
 class DCGAN(nn.Module):
@@ -99,9 +99,8 @@ class DCGAN(nn.Module):
                                                          activation=[nn.ReLU(), nn.ReLU(), nn.ReLU(), nn.ReLU(), nn.Tanh()],
                                                          pooling=[None for _ in range(5)]
                                                          ),
-                              img_size=image_size,
-                              output_shape="image",
-                              out_channels=1)
+                              image_shape=self.image_shape,
+                              output_shape="image")
         
         self.D = BasicConvNet(conv_config=conv_configure(model=Convolution_layer,
                                                          in_channels=[image_channel, 64, 128, 256, 512],
@@ -113,16 +112,15 @@ class DCGAN(nn.Module):
                                                          activation=[nn.LeakyReLU(), nn.LeakyReLU(), nn.LeakyReLU(), nn.LeakyReLU(), nn.Sigmoid()],
                                                          pooling=[None for _ in range(5)]
                                                          ),
-                              img_size=image_size,
-                              output_shape="scalar",
-                              out_channels=1)
+                              image_shape=self.image_shape,
+                              output_shape="scalar")
     
     def get_G_loss(self, batch_size, epoch):
         self.batch_size = batch_size
-        z = torch.randn(batch_size, self.latent_dim, 1, 1).cuda()
+        z = torch.randn((batch_size, self.latent_dim, 1, 1), device=device)
         fake = self.G(z)
         
-        label_real = torch.ones(batch_size, 1).cuda()
+        label_real = torch.ones((batch_size, 1), device=device)
         pred_fake = self.D(fake).view(batch_size, -1)
         loss_g = self.criterion(pred_fake, label_real)
         return loss_g.requires_grad_(True)
@@ -130,11 +128,11 @@ class DCGAN(nn.Module):
         
         
     def get_D_loss(self, batch_size, epoch, real):
-        z = torch.randn(batch_size, self.latent_dim, 1, 1).cuda()
+        z = torch.randn((batch_size, self.latent_dim, 1, 1), device=device)
         fake = self.G(z).detach()
         
-        label_real = torch.ones(batch_size, 1).cuda()
-        label_fake = torch.zeros(batch_size, 1).cuda()
+        label_real = torch.ones((batch_size, 1), device=device)
+        label_fake = torch.zeros((batch_size, 1), device=device)
         pred_real = self.D(real).view(batch_size, -1)
         pred_fake = self.D(fake).view(batch_size, -1)
         
@@ -143,7 +141,7 @@ class DCGAN(nn.Module):
 
 
     def forward(self):
-        return self.G(torch.randn(self.batch_size, self.latent_dim, 1, 1).cuda())
+        return self.G(torch.randn((self.batch_size, self.latent_dim, 1, 1), device=device))
     
     
 class CGAN(nn.Module):
@@ -171,14 +169,14 @@ class CGAN(nn.Module):
     
     def get_G_loss(self, batch_size, epoch):
         self.batch_size = batch_size
-        z = torch.randn(batch_size, self.latent_dim).cuda()
-        condition = self.embedding(torch.randint(0, 9, (batch_size, )).cuda())
+        z = torch.randn((batch_size, self.latent_dim), device=device)
+        condition = self.embedding(torch.randint(0, 9, (batch_size, ), device=device))
         z_c = torch.cat((z, condition), -1)
         fake = self.G(z_c)
         
         fake_c = torch.cat((fake, condition), -1)
         
-        label_real = torch.ones(batch_size, 1).cuda()
+        label_real = torch.ones((batch_size, 1), device=device)
         pred_fake = self.D(fake_c)
         
         loss_g = self.criterion(pred_fake, label_real)
@@ -186,16 +184,16 @@ class CGAN(nn.Module):
         
         
     def get_D_loss(self, batch_size, epoch, real):
-        z = torch.randn(batch_size, self.latent_dim).cuda()
-        condition = self.embedding(torch.randint(0, 9, (batch_size, )).cuda())
+        z = torch.randn((batch_size, self.latent_dim), device=device)
+        condition = self.embedding(torch.randint(0, 9, (batch_size, ), device=device))
         z_c = torch.cat((z, condition), -1)
         fake = self.G(z_c).detach()
         
         real_c = torch.cat((real.view(batch_size, -1), condition), -1)
         fake_c = torch.cat((fake, condition), -1)
         
-        label_real = torch.ones(batch_size, 1).cuda()
-        label_fake = torch.zeros(batch_size, 1).cuda()
+        label_real = torch.ones((batch_size, 1), device=device)
+        label_fake = torch.zeros((batch_size, 1), device=device)
         pred_real = self.D(real_c)
         pred_fake = self.D(fake_c)
         
@@ -204,8 +202,8 @@ class CGAN(nn.Module):
     
     
     def forward(self):
-        z = torch.randn(self.batch_size, self.latent_dim).cuda()
-        condition = self.embedding(torch.randint(0, 9, (self.batch_size, )).cuda())
+        z = torch.randn((self.batch_size, self.latent_dim), device=device)
+        condition = self.embedding(torch.randint(0, 9, (self.batch_size, ), device=device))
         z_c = torch.cat((z, condition), -1)
         return self.G(z_c)
     
@@ -229,9 +227,8 @@ class WGAN(nn.Module):
                                                          activation=[nn.ReLU(), nn.ReLU(), nn.ReLU(), nn.ReLU(), nn.Tanh()],
                                                          pooling=[None for _ in range(5)]
                                                          ),
-                              img_size=image_size,
-                              output_shape="image",
-                              out_channels=1)
+                              image_shape=self.image_shape,
+                              output_shape="image")
         
         self.D = BasicConvNet(conv_config=conv_configure(model=Convolution_layer,
                                                          in_channels=[image_channel, 64, 128, 256, 512],
@@ -243,15 +240,13 @@ class WGAN(nn.Module):
                                                          activation=[nn.LeakyReLU(), nn.LeakyReLU(), nn.LeakyReLU(), nn.LeakyReLU(), nn.Sigmoid()],
                                                          pooling=[None for _ in range(5)]
                                                          ),
-                              img_size=image_size,
-                              output_shape="scalar",
-                              out_channels=1)
-    
+                              image_shape=self.image_shape,
+                              output_shape="scalar")
     
     def get_G_loss(self, batch_size, epoch):
         if epoch % 5 == 0:
             self.batch_size = batch_size
-            z = torch.randn(batch_size, self.latent_dim, 1, 1).cuda()
+            z = torch.randn((batch_size, self.latent_dim, 1, 1), device=device)
             fake = self.G(z)
             
             pred_fake = self.D(fake).view(batch_size, -1)
@@ -263,7 +258,7 @@ class WGAN(nn.Module):
         
         
     def get_D_loss(self, batch_size, epoch, real):
-        z = torch.randn(batch_size, self.latent_dim, 1, 1).cuda()
+        z = torch.randn((batch_size, self.latent_dim, 1, 1), device=device)
         fake = self.G(z).detach()
         
         pred_real = self.D(real).view(batch_size, -1)
@@ -274,7 +269,7 @@ class WGAN(nn.Module):
 
 
     def forward(self):
-        return self.G(torch.randn(self.batch_size, self.latent_dim, 1, 1).cuda())
+        return self.G(torch.randn(self.batch_size, self.latent_dim, 1, 1), device=device))
     
 
 class WGAN_GP(nn.Module):
@@ -299,9 +294,8 @@ class WGAN_GP(nn.Module):
                                                          activation=[nn.ReLU(), nn.ReLU(), nn.ReLU(), nn.ReLU(), nn.Tanh()],
                                                          pooling=[None for _ in range(5)]
                                                          ),
-                              img_size=image_size,
-                              output_shape="image",
-                              out_channels=1)
+                              image_shape=self.image_shape,
+                              output_shape="image")
         
         self.D = BasicConvNet(conv_config=conv_configure(model=Convolution_layer,
                                                          in_channels=[image_channel, 64, 128, 256, 512],
@@ -313,9 +307,8 @@ class WGAN_GP(nn.Module):
                                                          activation=[nn.LeakyReLU(), nn.LeakyReLU(), nn.LeakyReLU(), nn.LeakyReLU(), nn.Sigmoid()],
                                                          pooling=[None for _ in range(5)]
                                                          ),
-                              img_size=image_size,
-                              output_shape="scalar",
-                              out_channels=1)
+                              image_shape=self.image_shape,
+                              output_shape="scalar")
     
     def compute_gp(self, real_sample, fake_sample):
         """Calculates the gradient penalty loss for WGAN GP"""
@@ -335,8 +328,8 @@ class WGAN_GP(nn.Module):
     def get_G_loss(self, batch_size, epoch):
         if epoch % 5 == 0:
             self.batch_size = batch_size
-            z = torch.randn((batch_size, self.latent_dim, 1, 1), device=device, requires_grad=True)
-            fake = self.G(z).requires_grad_(True)
+            z = torch.randn((batch_size, self.latent_dim, 1, 1), device=device)
+            fake = self.G(z)
             
             pred_fake = self.D(fake).view(batch_size, -1)
             
@@ -345,21 +338,23 @@ class WGAN_GP(nn.Module):
         else:
             return self.loss_g
         
+        
     def get_D_loss(self, batch_size, epoch, real):
-        z = torch.randn((batch_size, self.latent_dim, 1, 1), device=device)
-        fake = self.G(z)
-        
-        pred_real = self.D(real).view(batch_size, -1)
-        pred_fake = self.D(fake).view(batch_size, -1)
-        
-        gradient_penalty = self.compute_gp(real.requires_grad_(True), fake.requires_grad_(True))
+        with torch.enable_grad():
+            z = torch.randn((batch_size, self.latent_dim, 1, 1), requires_grad=True, device=device)
+            fake = self.G(z)
+            
+            pred_real = self.D(real).view(batch_size, -1)
+            pred_fake = self.D(fake).view(batch_size, -1)
+            
+            gradient_penalty = self.compute_gp(real, fake)
         
         loss_d = -torch.mean(pred_real) + torch.mean(pred_fake) + self.lambda_gp * gradient_penalty
         return loss_d.requires_grad_(True)
 
 
     def forward(self):
-        return self.G(torch.randn(self.batch_size, self.latent_dim, 1, 1).cuda())
+        return self.G(torch.randn((self.batch_size, self.latent_dim, 1, 1), device=device))
     
 
 class WGAN_DIV(nn.Module):
@@ -383,9 +378,8 @@ class WGAN_DIV(nn.Module):
                                                          activation=[nn.ReLU(), nn.ReLU(), nn.ReLU(), nn.ReLU(), nn.Tanh()],
                                                          pooling=[None for _ in range(5)]
                                                          ),
-                              img_size=image_size,
-                              output_shape="image",
-                              out_channels=1)
+                              image_shape=self.image_shape,
+                              output_shape="image")
         
         self.D = BasicConvNet(conv_config=conv_configure(model=Convolution_layer,
                                                          in_channels=[image_channel, 64, 128, 256, 512],
@@ -397,18 +391,17 @@ class WGAN_DIV(nn.Module):
                                                          activation=[nn.LeakyReLU(), nn.LeakyReLU(), nn.LeakyReLU(), nn.LeakyReLU(), nn.Sigmoid()],
                                                          pooling=[None for _ in range(5)]
                                                          ),
-                              img_size=image_size,
-                              output_shape="scalar",
-                              out_channels=1)
+                              image_shape=self.image_shape,
+                              output_shape="scalar")
     
     
     def compute_div_gp(self, real, fake):
-        real_out = torch.ones(real.size(0), 1).cuda()
+        real_out = torch.ones((real.size(0), 1), device=device)
         
         real_grad = torch.autograd(self.D(real), real, real_out, create_graph=True, retain_graph=True, only_inputs=True)[0]
         real_grad_norm = real_grad.view(real_grad.size(0), -1).pow(2).sum(1) ** (self.p / 2)
         
-        fake_out = torch.ones(real.size(0), 1).cuda()
+        fake_out = torch.ones((real.size(0), 1), device=device)
         
         fake_grad = torch.autograd(self.D(fake), fake, fake_out, create_graph=True, retain_graph=True, only_inputs=True)[0]
         fake_grad_norm = fake_grad.view(fake_grad.size(0), -1).pow(2).sum(1) ** (self.p / 2)
@@ -420,7 +413,7 @@ class WGAN_DIV(nn.Module):
     def get_G_loss(self, batch_size, epoch):
         if epoch % 5 == 0:
             self.batch_size = batch_size
-            z = torch.randn(batch_size, self.latent_dim, 1, 1).cuda()
+            z = torch.randn((batch_size, self.latent_dim, 1, 1), device=device)
             fake = self.G(z)
             
             pred_fake = self.D(fake).view(batch_size, -1)
@@ -432,20 +425,25 @@ class WGAN_DIV(nn.Module):
         
         
     def get_D_loss(self, batch_size, epoch, real):
-        z = torch.randn(batch_size, self.latent_dim, 1, 1).cuda()
-        fake = self.G(z).detach()
-        
-        pred_real = self.D(real).view(batch_size, -1)
-        pred_fake = self.D(fake).view(batch_size, -1)
-        
-        div_gp = self.compute_div_gradient_penalty(pred_real, pred_fake)
+        with torch.enable_grad():
+            z = torch.randn((batch_size, self.latent_dim, 1, 1), device=device, requires_grad=True)
+            fake = self.G(z)
+            
+            pred_real = self.D(real).view(batch_size, -1)
+            pred_fake = self.D(fake).view(batch_size, -1)
+            
+            div_gp = self.compute_div_gradient_penalty(pred_real, pred_fake)
         
         loss_d = -torch.mean(pred_real) + torch.mean(pred_fake) + div_gp
         return loss_d.requires_grad_(True)
 
 
     def forward(self):
-        return self.G(torch.randn(self.batch_size, self.latent_dim, 1, 1).cuda())
+        return self.G(torch.randn((self.batch_size, self.latent_dim, 1, 1), device=device))
+
+
+class Pix2Pix(nn.Module):
+    pass
     
     
 class LitGAN(pl.LightningModule):
@@ -454,7 +452,7 @@ class LitGAN(pl.LightningModule):
                  optim_name: str,
                  model_name,
                  model_args):
-        super().__init__()_
+        super().__init__()
         self.automatic_optimization = False
         self.lr = lr
         self.optimizer = getattr(importlib.import_module("torch.optim"), optim_name)
@@ -487,8 +485,6 @@ class LitGAN(pl.LightningModule):
         optim_d.zero_grad()
         
         self.untoggle_optimizer(optim_d)
-        
-        
         
         
     def configure_optimizers(self):

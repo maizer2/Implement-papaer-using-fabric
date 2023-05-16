@@ -1,8 +1,11 @@
 import importlib
 
 import lightning.pytorch as pl
+import torch
 import torch.nn as nn
 import torch.optim as toptim
+
+device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
 '''
 MLP

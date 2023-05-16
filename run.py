@@ -5,7 +5,6 @@ from omegaconf import OmegaConf
 import lightning as L
 import lightning.pytorch as pl
 from lightning.pytorch.callbacks.early_stopping import EarlyStopping
-
 import torch
 import torch.nn as nn
 from torch.utils import data
@@ -19,7 +18,10 @@ def get_opt():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", 
                         type=str, 
-                        default="configs/gan/WGAN_GP.yaml",
+                        default="configs/ae/Unet.yaml",
+                        # default="configs/ae/ConvAE.yaml",
+                        # default="configs/ae/MLPAE.yaml",
+                        # default="configs/gan/WGAN_GP.yaml",
                         # default="configs/gan/WGAN.yaml",
                         # default="configs/gan/CGAN.yaml",
                         # default="configs/gan/DCGAN.yaml",
@@ -110,9 +112,7 @@ if __name__ == "__main__":
     
     trainer = pl.Trainer(max_epochs=opt.max_epochs,
                          default_root_dir=get_log_path(config),
-                         num_nodes=1,
-                         strategy='ddp_find_unused_parameters_true',
-                         devices=1
+                         strategy='ddp_find_unused_parameters_false'
                         #  callbacks=[EarlyStopping(monitor="val_loss", mode="min")]
                          )
     

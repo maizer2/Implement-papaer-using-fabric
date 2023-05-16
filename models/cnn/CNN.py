@@ -57,40 +57,27 @@ class Convolution_layer(nn.Module):
    
 
 class BasicConvNet(nn.Module):
-    def __init__(self, img_size, out_channels, conv_config = None, output_shape = "image"):
+    def __init__(self, image_shape, conv_config = None, output_shape = "image"):
         super().__init__()
-        self.img_size = img_size
+        self.image_shape = image_shape
         self.output_shape = output_shape
-        self.out_channels = out_channels
-        if conv_config is None:
-            conv_config = conv_configure(
-                model=Convolution_layer,
-                in_channels= [in_channels,  1024, 512, 256, 128],
-                out_channels=[1024,         512,  256, 128, out_channels],
-                k=[5 for _ in range(5)],
-                s=[1 for _ in range(5)],
-                p=[0 for _ in range(5)],
-                normalize=[None for _ in range(5)],
-                activation=[nn.ReLU() for _ in range(5)],
-                pooling=[None for _ in range(5)]           
-            )
         
         layers = []
         for idx in range(len(conv_config.in_channels)):
             layers.append(conv_config.model(conv_config.in_channels[idx], 
-                                                 conv_config.out_channels[idx], 
-                                                 conv_config.k[idx], 
-                                                 conv_config.s[idx], 
-                                                 conv_config.p[idx],
-                                                 conv_config.normalize[idx],
-                                                 conv_config.activation[idx],
-                                                 conv_config.pooling[idx]))
+                                            conv_config.out_channels[idx], 
+                                            conv_config.k[idx], 
+                                            conv_config.s[idx], 
+                                            conv_config.p[idx],
+                                            conv_config.normalize[idx],
+                                            conv_config.activation[idx],
+                                            conv_config.pooling[idx]))
         
         self.layers = nn.Sequential(*layers)
         
     def forward(self, x):
         if self.output_shape == "image":
-            out = self.layers(x).view(x.size(0), self.out_channels, self.img_size, self.img_size)
+            out = self.layers(x).view(x.size(0), self.image_shape[0], self.image_shape[1], self.image_shape[2])
         else:
             out = self.layers(x)
         return out

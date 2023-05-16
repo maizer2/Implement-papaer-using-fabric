@@ -1,0 +1,13 @@
+model:
+  target: models.ae.AE.LitAE
+  params:
+    optim_name: Adam
+    lr: 0.005
+    model_name: ConvAE
+    model_args:
+      image_channel: 1
+      image_size: 32
+data:
+  image_mean: 0.5
+  image_std: 0.5
+  
