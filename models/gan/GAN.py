@@ -49,29 +49,31 @@ class VanilaGAN(nn.Module):
                                       features=[out_features, 256, 512, 1024, 1])
     
     
-    def get_G_loss(self, batch_size, epoch):
-        z = torch.randn((batch_size, self.latent_dim), device=device)
+    def get_G_loss(self, batch, epoch):
+        real, _ = batch
+        z = torch.randn((real.size(0), self.latent_dim), device=device, requires_grad=True)
         fake = self.G(z)
         
-        label_real = torch.ones((batch_size, 1), device=device)
+        label_real = torch.ones((real.size(0), 1), device=device)
         pred_fake = self.D(fake)
         
         loss_g = self.criterion(pred_fake, label_real)
         return loss_g.requires_grad_(True)
         
         
-    def get_D_loss(self, batch_size, epoch, real):
-        real = real.view(batch_size, -1)
-        z = torch.randn((batch_size, self.latent_dim), device=device)
+    def get_D_loss(self, batch, epoch):
+        real, _ = batch
+        real = real.view(real.size(0), -1)
+        z = torch.randn((real.size(0), self.latent_dim), device=device, requires_grad=True)
         fake = self.G(z).detach()
         
-        label_real = torch.ones((batch_size, 1), device=device)
-        label_fake = torch.zeros((batch_size, 1), device=device)
+        label_real = torch.ones((real.size(0), 1), device=device)
+        label_fake = torch.zeros((real.size(0), 1), device=device)
         pred_real = self.D(real)
         pred_fake = self.D(fake)
         
-        loss_d = ( self.criterion(pred_real, label_real).requires_grad_(True) + self.criterion(pred_fake, label_fake).requires_grad_(True) ) / 2
-        return loss_d.requires_grad_(True)
+        loss_d = ( self.criterion(pred_real, label_real) + self.criterion(pred_fake, label_fake) ) / 2
+        return loss_d
 
 
     def forward(self):

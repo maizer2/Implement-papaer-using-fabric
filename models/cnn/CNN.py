@@ -57,7 +57,7 @@ class Convolution_layer(nn.Module):
    
 
 class BasicConvNet(nn.Module):
-    def __init__(self, image_shape, conv_config = None, output_shape = "image"):
+    def __init__(self, conv_config = None, output_shape = None, image_shape = None):
         super().__init__()
         self.image_shape = image_shape
         self.output_shape = output_shape
@@ -91,36 +91,34 @@ Output out_features
 class LeNet5(nn.Module):
     def __init__(self,
                  in_channels = None,
-                 out_features = None,
-                 hidden_activation = nn.ReLU(),
-                 final_activation = nn.Softmax(1),
-                 pooling = nn.AvgPool2d(2),
-                 channels = None,
-                 features = None):
+                 out_features = None):
         super().__init__()
+        self.criterion = nn.CrossEntropyLoss()
         
-        if channels is None:
-            channels = [in_channels, 6, 16]
-        if features is None:
-            features = [16*5*5, 120, 84, out_features]
+        self.conv_layers = BasicConvNet(conv_configure(model=Convolution_layer,
+                                                       in_channels=[in_channels, 6],
+                                                       out_channels=[6, 16],
+                                                       k=[5, 5],
+                                                       s=[1, 1],
+                                                       p=[0, 0],
+                                                       normalize=[None, None],
+                                                       activation=[nn.ReLU(), nn.ReLU()],
+                                                       pooling=[nn.AvgPool2d(2), nn.AvgPool2d(2)]))
         
-        conv_layers = []
-        for idx in range(len(channels) -1):
-            k, s, p = 5, 1, 0
-            conv_layers.append(Convolution_layer(channels[idx], 
-                                                 channels[idx+1], 
-                                                 k, s, p, 
-                                                 activation=hidden_activation, 
-                                                 pooling=pooling))
+        self.mlp_layers = MultiLayerPerceptron(hidden_activation=nn.ReLU(),
+                                               final_activation=nn.Softmax(1),
+                                               features=[16*5*5, 120, 84, out_features])
         
-        self.conv_layers = nn.Sequential(*conv_layers)
-        self.mlp_layers = MultiLayerPerceptron(hidden_activation=hidden_activation,
-                                               final_activation=final_activation,
-                                               features=features)
         
     def forward(self, x):
         return self.mlp_layers(self.conv_layers(x).view(x.size(0),-1))
         
+        
+    def get_loss(self, batch):
+        x, y = batch
+        y_hat = self.model(x)
+        loss = self.criterion(y_hat, y)
+        return loss
 
 '''
 AlexNet
@@ -130,42 +128,35 @@ Output 10
 class AlexNet(nn.Module):
     def __init__(self,
                  in_channels = None,
-                 out_features = None,
-                 hidden_activation = nn.ReLU(),
-                 final_activation = nn.Softmax(1),
-                 pooling=nn.MaxPool2d(3, 2, 0),
-                 channels = None,
-                 features = None):
+                 out_features = None):
         super().__init__()
-        
-        if channels is None:
-            channels = [in_channels, 96, 256, 384, 384, 256]
-        if features is None:
-            features = [256*6*6, 4096, 4096, out_features]
-        
-        conv_layers = []
-        for idx in range(len(channels) -1):
-            k, s, p = 3, 1, 1
-            pooling = nn.MaxPool2d(3, 2, 0)
-            
-            if idx == 0:
-                k, s, p = 11, 4, 0
-            elif idx == 1:
-                k, s, p = 5, 1, 2
-            elif idx in (2, 3):
-                pooling=None    
+        self.criterion = nn.CrossEntropyLoss()
                 
-            conv_layers.append(Convolution_layer(channels[idx], channels[idx+1], k, s, p, activation=nn.ReLU(), pooling=pooling))
+        self.conv_layers = BasicConvNet(conv_configure(model=Convolution_layer,
+                                                       in_channels=[in_channels, 96, 256, 384, 384],
+                                                       out_channels=[96, 256, 384, 256],
+                                                       k=[11, 5, 3, 3, 3],
+                                                       s=[4, 1, 1, 1, 1],
+                                                       p=[0, 2, 1, 1, 1],
+                                                       normalize=[None for _ in range(5)],
+                                                       activation=[nn.ReLU(), nn.ReLU()],
+                                                       pooling=[nn.MaxPool2d(3, 2, 0), nn.MaxPool2d(3, 2, 0), None, None, nn.MaxPool2d(3, 2, 0)]))
         
-        self.conv_layers = nn.Sequential(*conv_layers)
-        self.mlp_layers = MultiLayerPerceptron(hidden_activation=hidden_activation,
-                                               final_activation=final_activation,
-                                               features=features)
+        self.mlp_layers = MultiLayerPerceptron(hidden_activation=nn.ReLU(),
+                                               final_activation=nn.Softmax(1),
+                                               features=[256*6*6, 4096, 4096, out_features])
     
     def forward(self, x):
         return self.mlp_layers(self.conv_layers(x).view(x.size(0),-1))
        
            
+    def get_loss(self, batch):
+        x, y = batch
+        y_hat = self.model(x)
+        loss = self.criterion(y_hat, y)
+        return loss
+    
+    
 '''
 VGGNet
 Input 1x224x224
@@ -193,9 +184,10 @@ class VGGNet(nn.Module):
                  hidden_activation = nn.ReLU(),
                  final_activation = nn.Softmax(1),
                  vgg_layers = None,
-                 features = None,
-                 batch_norm = True):
+                 features = None,):
         super().__init__()
+        self.criterion = nn.CrossEntropyLoss()
+        
         channels = self.get_vgg_config(vgg_layers) # [64, 'M', 128, 'M', 256, 256, 'M', 512, 512, 'M', 512, 512, 'M']
         if features is None:
             features = [512*7*7, 4096, 4096, out_features]
@@ -215,8 +207,7 @@ class VGGNet(nn.Module):
             _out_channel = channels[idx]
             k, s, p = 3, 1, 1
             
-            if batch_norm:
-                normalize = nn.BatchNorm2d(_out_channel)
+            normalize = nn.BatchNorm2d(_out_channel)
                 
             conv_layers.append(Convolution_layer(_in_channel, _out_channel, k, s, p, normalize, nn.ReLU(), pooling))
             in_channels = _out_channel
@@ -228,6 +219,13 @@ class VGGNet(nn.Module):
     
     def forward(self, x):
         return self.mlp_layers(self.conv_layers(x).view(x.size(0),-1))
+       
+           
+    def get_loss(self, batch):
+        x, y = batch
+        y_hat = self.model(x)
+        loss = self.criterion(y_hat, y)
+        return loss
        
 
 '''
@@ -366,6 +364,7 @@ class ResNet(nn.Module):
                  res_layers = 18,
                  features = None):
         super().__init__()
+        self.criterion = nn.CrossEntropyLoss()
         
         block, n_blocks, channels = self.get_resnet_config(res_layers)
         self.in_channels = channels[0]
@@ -395,42 +394,45 @@ class ResNet(nn.Module):
         
     def forward(self, x):
         return self.mlp_layers(self.conv_layers(x).view(x.size(0), -1))
+       
+           
+    def get_loss(self, batch):
+        x, y = batch
+        y_hat = self.model(x)
+        loss = self.criterion(y_hat, y)
+        return loss
 
 
 class LitCNN(pl.LightningModule):
     def __init__(self,
                  lr,
                  model_name,
-                 model_args,
-                 criterion = nn.CrossEntropyLoss()):
+                 model_args):
         super().__init__()
         self.lr = lr
-        self.criterion = criterion
         self.model = getattr(importlib.import_module(__name__), model_name)(**model_args)
     
     
     def forward(self, x):
         return self.model(x)
-    
-    
-    def get_loss(self, batch, log_string):
-        x, y = batch
-        y_hat = self.model(x)
-        loss = self.criterion(y_hat, y)
-        self.log(log_string, loss, sync_dist=True)
-        return loss
         
         
     def training_step(self, batch, batch_idx):
-        return self.get_loss(batch, "train_loss")
+        loss = self.model.get_loss(batch)
+        self.log("train_loss", loss, sync_dist=True)
+        return loss
     
     
     def validation_step(self, batch, batch_idx):
-        self.get_loss(batch, "val_loss")
+        loss = self.model.get_loss(batch)
+        self.log("val_loss", loss, sync_dist=True)
+        return loss
         
     
     def test_step(self, batch, batch_idx):
-        return self.get_loss(batch, "test_loss")
+        loss = self.model.get_loss(batch)
+        self.log("test_loss", loss, sync_dist=True)
+        return loss
     
     
     def configure_optimizers(self):

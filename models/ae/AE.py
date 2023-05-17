@@ -67,31 +67,27 @@ class ConvAE(nn.Module):
         self.image_shape = (image_channel, image_size, image_size)
         self.criterion = nn.MSELoss()
         
-        self.encoder = BasicConvNet(conv_config=conv_configure(model=Convolution_layer,
-                                                               in_channels=[image_channel, 64, 128, 256, 512],
-                                                               out_channels=[64, 128, 256, 512, 512],
-                                                               k=[4, 4, 4, 4, 2],
-                                                               s=[2 for _ in range(5)],
-                                                               p=[1, 1, 1, 1, 0],
-                                                               normalize=[nn.BatchNorm2d(64),nn.BatchNorm2d(128), nn.BatchNorm2d(256), nn.BatchNorm2d(512), nn.BatchNorm2d(512)],
-                                                               activation=[nn.LeakyReLU() for _ in range(5)],
-                                                               pooling=[None for _ in range(5)]
-                                                               ),
-                                    image_shape=self.image_shape,
-                                    output_shape="scalar")
+        self.encoder = BasicConvNet(conv_configure(model=Convolution_layer,
+                                                   in_channels=[image_channel, 64, 128, 256, 512],
+                                                   out_channels=[64, 128, 256, 512, 512],
+                                                   k=[4, 4, 4, 4, 2],
+                                                   s=[2 for _ in range(5)],
+                                                   p=[1, 1, 1, 1, 0],
+                                                   normalize=[nn.BatchNorm2d(64),nn.BatchNorm2d(128), nn.BatchNorm2d(256), nn.BatchNorm2d(512), nn.BatchNorm2d(512)],
+                                                   activation=[nn.LeakyReLU() for _ in range(5)],
+                                                   pooling=[None for _ in range(5)]))
         
-        self.decoder = BasicConvNet(conv_config=conv_configure(model=DeConvolution_layer,
-                                                               in_channels=[512, 512, 256, 128, 64],
-                                                               out_channels=[512, 256, 128, 64, image_channel],
-                                                                k=[4, 4, 4, 4, 4],
-                                                                s=[2 for _ in range(5)],
-                                                                p=[1, 1, 1, 1, 1],
-                                                                normalize=[nn.BatchNorm2d(512), nn.BatchNorm2d(256), nn.BatchNorm2d(128), nn.BatchNorm2d(64), nn.BatchNorm2d(image_channel)],
-                                                                activation=[nn.ReLU(), nn.ReLU(), nn.ReLU(), nn.ReLU(), nn.Sigmoid()],
-                                                                pooling=[None for _ in range(5)]
-                                                                ),
-                                    image_shape=self.image_shape,
-                                    output_shape="image")
+        self.decoder = BasicConvNet(conv_configure(model=DeConvolution_layer,
+                                                   in_channels=[512, 512, 256, 128, 64],
+                                                   out_channels=[512, 256, 128, 64, image_channel],
+                                                   k=[4, 4, 4, 4, 4],
+                                                   s=[2 for _ in range(5)],
+                                                   p=[1, 1, 1, 1, 1],
+                                                   normalize=[nn.BatchNorm2d(512), nn.BatchNorm2d(256), nn.BatchNorm2d(128), nn.BatchNorm2d(64), nn.BatchNorm2d(image_channel)],
+                                                   activation=[nn.ReLU(), nn.ReLU(), nn.ReLU(), nn.ReLU(), nn.Sigmoid()],
+                                                   pooling=[None for _ in range(5)]),
+                                    output_shape="image",
+                                    image_shape=self.image_shape)
     
     
     def forward(self, x):
@@ -107,22 +103,6 @@ class ConvAE(nn.Module):
         
 
 class Unet(nn.Module):
-    
-    def get_layers_using_config(self, config):
-        layers = []
-        for idx in range(len(config.in_channels)):
-            layers.append(config.model(in_channels=config.in_channels[idx],
-                                       out_channels=config.out_channels[idx],
-                                       k=config.k[idx], 
-                                       s=config.s[idx], 
-                                       p=config.p[idx],
-                                       normalize=config.normalize[idx],
-                                       activation=config.activation[idx],
-                                       pooling=config.pooling[idx]
-                                       ))
-        return layers
-    
-    
     def __init__(self, 
                  image_channel,
                  image_size):
@@ -130,43 +110,50 @@ class Unet(nn.Module):
         self.image_shape = (image_channel, image_size, image_size)
         self.criterion = nn.MSELoss()
         
-        encoder_config = conv_configure(model=Convolution_layer,
-                                             in_channels=[image_channel, 64, 128, 256, 512],
-                                             out_channels=[64, 128, 256, 512, 512],
-                                             k=[4, 4, 4, 4, 2],
-                                             s=[2 for _ in range(5)],
-                                             p=[1, 1, 1, 1, 1],
-                                             normalize=[nn.BatchNorm2d(64),nn.BatchNorm2d(128), nn.BatchNorm2d(256), nn.BatchNorm2d(512), nn.BatchNorm2d(512)],
-                                             activation=[nn.LeakyReLU(0.02) for _ in range(5)],
-                                             pooling=[None for _ in range(5)]
-                                             )
+        self.encoder = BasicConvNet(conv_configure(model=Convolution_layer,
+                                                   in_channels=[image_channel, 64, 128, 256, 512],
+                                                   out_channels=[64, 128, 256, 512, 512],
+                                                   k=[4, 4, 4, 4, 2],
+                                                   s=[2 for _ in range(5)],
+                                                   p=[1, 1, 1, 1, 0],
+                                                   normalize=[nn.BatchNorm2d(64),nn.BatchNorm2d(128), nn.BatchNorm2d(256), nn.BatchNorm2d(512), nn.BatchNorm2d(512)],
+                                                   activation=[nn.LeakyReLU(0.02) for _ in range(5)],
+                                                   pooling=[None for _ in range(5)]))
         
-        decoder_config = conv_configure(model=DeConvolution_layer,
-                                             in_channels=[512, 512, 256, 128, 64],
-                                             out_channels=[512, 512, 128, 64, image_channel],
-                                             k=[4 for _ in range(5)],
-                                             s=[2 for _ in range(5)],
-                                             p=[1 for _ in range(5)],
-                                             normalize=[nn.BatchNorm2d(512), nn.BatchNorm2d(256), nn.BatchNorm2d(128), nn.BatchNorm2d(64), nn.BatchNorm2d(image_channel)],
-                                             activation=[nn.LeakyReLU(0.02), nn.LeakyReLU(0.02), nn.LeakyReLU(0.02), nn.LeakyReLU(0.02), nn.Sigmoid()],
-                                             pooling=[None for _ in range(5)]
-                                             )
+        self.decoder = BasicConvNet(conv_configure(model=DeConvolution_layer,
+                                                   in_channels=[1024, 1024, 512, 256, 128],
+                                                   out_channels=[512, 256, 128, 64, image_channel],
+                                                   k=[4 for _ in range(5)],
+                                                   s=[2 for _ in range(5)],
+                                                   p=[1 for _ in range(5)],
+                                                   normalize=[nn.BatchNorm2d(512), nn.BatchNorm2d(256), nn.BatchNorm2d(128), nn.BatchNorm2d(64), nn.BatchNorm2d(image_channel)],
+                                                   activation=[nn.LeakyReLU(0.02), nn.LeakyReLU(0.02), nn.LeakyReLU(0.02), nn.LeakyReLU(0.02), nn.Sigmoid()],
+                                                   pooling=[None for _ in range(5)]),
+                                    output_shape="image",
+                                    image_shape=self.image_shape)
         
         
-        self.encoder_layers = self.get_layers_using_config(encoder_config)
-        self.decoder_layers = self.get_layers_using_config(decoder_config)
-        
-        self.unet_layer(torch.randn((64, 1, 28, 28), requires_grad=True))
-        # 1 -> 64 -> 128 -> 256 -> 512 -> 512
-        #                           <- 512
     def unet_layer(self, x):
-        out = []
-        for layer in self.encoder_layers:
-            out.append(layer(x))
+        encoder_out = []
         
-        print(out)
-        exit()
-    
+        for idx, layer in enumerate(self.encoder):
+            if idx == 0:
+                _out = layer(x)
+            else:
+                _out = layer(encoder_out[idx -1])
+            encoder_out.append(_out)
+            
+        encoder_out.reverse()
+        
+        decoder_out = []
+        for idx, layer in enumerate(self.decoder):
+            if idx == 0:
+                _out = layer(torch.cat((encoder_out[idx], encoder_out[idx]), 1))
+            else:
+                _out = layer(torch.cat((decoder_out[idx -1], encoder_out[idx]), 1))
+            decoder_out.append(_out)
+            
+        return decoder_out[-1]
 
     def forward(self, x):
         return self.unet_layer(x)
@@ -193,7 +180,12 @@ class LitAE(pl.LightningModule):
         
         
     def configure_optimizers(self):
-        optim = self.optimizer(self.model.parameters(), self.lr)
+        params = list()
+        
+        params.extend(list(self.model.encoder.parameters()))
+        params.extend(list(self.model.decoder.parameters()))
+        
+        optim = self.optimizer(params, self.lr)
         
         lr_scheduler = torch.optim.lr_scheduler.StepLR(optim, step_size=1)
         

@@ -44,6 +44,7 @@ class MultiLayerPerceptron(nn.Module):
                  final_activation = nn.Softmax(1),
                  features = None):
         super().__init__()
+        self.criterion = nn.CrossEntropyLoss()
         
         if features is None:
             features = [in_features, 512, 256, 128, 64, 32, 16, out_features]
@@ -62,6 +63,13 @@ class MultiLayerPerceptron(nn.Module):
     def forward(self, x):
         return self.layers(x.view(x.size(0), -1))
     
+    
+    def get_loss(self, batch):
+        x, y = batch
+        y_hat = self(x)
+        loss = self.criterion(y_hat, y)
+        return loss
+ 
  
 class LitMLP(pl.LightningModule):
     def __init__(self, 
@@ -70,27 +78,29 @@ class LitMLP(pl.LightningModule):
                  model_args):
         super().__init__()
         self.lr = lr
-        self.criterion = nn.CrossEntropyLoss()
         self.model = getattr(importlib.import_module(__name__), model_name)(**model_args)
         
     def forward(self, x):
         return self.model(x)
     
-    def get_loss(self, batch, log_string):
-        x, y = batch
-        y_hat = self.model(x)
-        loss = self.criterion(y_hat, y)
-        self.log(log_string, loss, sync_dist=True)
-        return loss
     
     def training_step(self, batch, batch_idx):
-        return self.get_loss(batch, "train_loss")
+        loss = self.model.get_loss(batch)
+        self.log("train_loss", loss, sync_dist=True)
+        return loss
+         
          
     def validation_step(self, batch, batch_idx):
-        self.get_loss(batch, "val_loss")
+        loss = self.model.get_loss(batch)
+        self.log( "val_loss", loss, sync_dist=True)
+        return loss
+    
     
     def test_step(self, batch, batch_idx):
-        return self.get_loss(batch, "test_loss")
+        loss = self.model.get_loss(batch)
+        self.log("test_loss", loss, sync_dist=True)
+        return loss
+    
     
     def configure_optimizers(self):
         return toptim.Adam(self.parameters(), self.lr)

@@ -10,4 +10,3 @@ model:
 data:
   image_mean: 0.5
   image_std: 0.5
-  
