@@ -90,13 +90,14 @@ Output out_features
 '''
 class LeNet5(nn.Module):
     def __init__(self,
-                 in_channels = None,
-                 out_features = None):
+                 image_channel,
+                 image_size,
+                 out_features):
         super().__init__()
         self.criterion = nn.CrossEntropyLoss()
         
         self.conv_layers = BasicConvNet(conv_configure(model=Convolution_layer,
-                                                       in_channels=[in_channels, 6],
+                                                       in_channels=[image_channel, 6],
                                                        out_channels=[6, 16],
                                                        k=[5, 5],
                                                        s=[1, 1],
@@ -127,13 +128,14 @@ Output 10
 '''
 class AlexNet(nn.Module):
     def __init__(self,
-                 in_channels = None,
-                 out_features = None):
+                 image_channel,
+                 image_size,
+                 out_features):
         super().__init__()
         self.criterion = nn.CrossEntropyLoss()
                 
         self.conv_layers = BasicConvNet(conv_configure(model=Convolution_layer,
-                                                       in_channels=[in_channels, 96, 256, 384, 384],
+                                                       in_channels=[image_size, 96, 256, 384, 384],
                                                        out_channels=[96, 256, 384, 256],
                                                        k=[11, 5, 3, 3, 3],
                                                        s=[4, 1, 1, 1, 1],
@@ -179,7 +181,8 @@ class VGGNet(nn.Module):
         return vgg_config
     
     def __init__(self,
-                 in_channels = None,
+                 image_channel,
+                 image_size,
                  out_features = None,
                  hidden_activation = nn.ReLU(),
                  final_activation = nn.Softmax(1),
@@ -203,14 +206,14 @@ class VGGNet(nn.Module):
             elif channels[idx +1] == "A":
                 pooling = nn.AvgPool2d(2, 2)
                 
-            _in_channel = in_channels
+            _in_channel = image_channel
             _out_channel = channels[idx]
             k, s, p = 3, 1, 1
             
             normalize = nn.BatchNorm2d(_out_channel)
                 
             conv_layers.append(Convolution_layer(_in_channel, _out_channel, k, s, p, normalize, nn.ReLU(), pooling))
-            in_channels = _out_channel
+            image_channel = _out_channel
         
         self.conv_layers = nn.Sequential(*conv_layers)
         self.mlp_layers = MultiLayerPerceptron(hidden_activation=hidden_activation,
@@ -357,7 +360,8 @@ class ResNet(nn.Module):
     
     
     def __init__(self,
-                 in_channels,
+                 image_channel,
+                 image_size,
                  out_features,
                  hidden_activation = nn.ReLU(),
                  final_activation = nn.Softmax(1),
@@ -372,7 +376,7 @@ class ResNet(nn.Module):
         if features is None:
             features = [512 * block.expansion, out_features]
         
-        conv_layers = [Convolution_layer(in_channels, 
+        conv_layers = [Convolution_layer(image_channel, 
                                          self.in_channels, 
                                          7, 2, 3, 
                                          nn.BatchNorm2d(self.in_channels), 
@@ -406,10 +410,12 @@ class ResNet(nn.Module):
 class LitCNN(pl.LightningModule):
     def __init__(self,
                  lr,
+                 optim_name,
                  model_name,
                  model_args):
         super().__init__()
         self.lr = lr
+        self.optimizer = getattr(importlib.import_module("torch.optim"), optim_name)
         self.model = getattr(importlib.import_module(__name__), model_name)(**model_args)
     
     
@@ -436,5 +442,5 @@ class LitCNN(pl.LightningModule):
     
     
     def configure_optimizers(self):
-        return toptim.Adam(self.parameters(), self.lr)
+        return self.optimizer(self.parameters(), self.lr)
     

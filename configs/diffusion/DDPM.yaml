@@ -1,0 +1,20 @@
+model:
+  target: models.diffusion.Diffusion.LitDiffusion
+  params:
+    lr: 1e-3
+    optim_name: Adam
+    model_name: DDPM
+    model_args:
+      image_channel: 3
+      image_size: 256
+      n_steps: 1000
+      eps_model_name: models.ae.AE.Unet
+      eps_model_args:
+        n_channels: 64
+        ch_mults: [1, 2, 2, 4]
+        is_attn: [False, False, True, True]
+        n_blocks: 2
+        
+data:
+  image_mean: 0.5
+  image_std: 0.5

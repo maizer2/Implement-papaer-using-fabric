@@ -1,4 +1,4 @@
-import importlib, os
+import importlib, os, math
 from collections import namedtuple
 from typing import Any, Optional
 
@@ -13,7 +13,7 @@ from torchvision import transforms
 from models.cnn.CNN import BasicConvNet, DeConvolution_layer, Convolution_layer
 from models.mlp.MLP import MultiLayerPerceptron
 
-device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 conv_configure= namedtuple("conv_config", ["model", 
                                            "in_channels", "out_channels", 
@@ -155,6 +155,61 @@ class Unet(nn.Module):
             
         return decoder_out[-1]
 
+    def forward(self, x):
+        return self.unet_layer(x)
+    
+    
+    def get_loss(self, batch, epoch):
+        x, _ = batch
+        x_hat = self(x.requires_grad_(True))
+        
+        loss = self.criterion(x, x_hat)
+        return loss
+    
+    
+class Unet_diff(nn.Module):
+    class Swish(nn.Module):
+        def __init__(self):
+            pass
+        
+        def forward(self, x):
+            return x * torch.sigmoid(x)
+        
+        
+    class TimeEmbedding(nn.Module):
+        def __init__(self, n_channels):
+            super().__init__()
+            self.n_channels = n_channels
+            
+            self.linear1 = nn.Linear(self.n_channels // 4, self.n_channels)
+            self.activation = self.Swish()
+            self.linear2 = nn.Linear(self.n_channels, self.n_channels)
+        
+        
+        def forward(self, t):
+            half_dim = self.n_channels // 8
+            emb =  math.log(10_000) / (half_dim  - 1)
+            emb = torch.exp(torch.arange(half_dim, device=device) * -emb)
+            emb = t[:, None] * emb[None, :]
+            emb = torch.cat((emb.sin(), emb.cos()), 1)
+            
+            emb = self.act(self.linear1(emb))
+            emb = self.linear2(emb)
+            
+            return emb
+            
+    def __init__(self, 
+                 image_channel,
+                 image_size,
+                 n_channels = 64,
+                 ch_mults = (1, 2, 2, 4),
+                 is_attn = (False, False, True, True),
+                 n_blocks = 2):
+        super().__init__()
+        n_resolutions = len(ch_mults)
+        self.image_proj = nn.Conv2d(image_channel, n_channels, 3, 1)
+        self.time_emb = self.TimeEmbedding(n_channels * 4)
+        
     def forward(self, x):
         return self.unet_layer(x)
     

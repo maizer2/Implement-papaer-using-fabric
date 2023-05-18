@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import torch.optim as toptim
 
-device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 '''
 MLP
@@ -74,10 +74,12 @@ class MultiLayerPerceptron(nn.Module):
 class LitMLP(pl.LightningModule):
     def __init__(self, 
                  lr,
+                 optim_name,
                  model_name,
                  model_args):
         super().__init__()
         self.lr = lr
+        self.optimizer = getattr(importlib.import_module("torch.optim"), optim_name)
         self.model = getattr(importlib.import_module(__name__), model_name)(**model_args)
         
     def forward(self, x):
@@ -103,4 +105,4 @@ class LitMLP(pl.LightningModule):
     
     
     def configure_optimizers(self):
-        return toptim.Adam(self.parameters(), self.lr)
+        return self.optimizer(self.parameters(), self.lr)

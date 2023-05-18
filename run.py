@@ -18,7 +18,8 @@ def get_opt():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", 
                         type=str, 
-                        default="configs/ae/Unet.yaml",
+                        default="configs/diffusion/DDPM.yaml",
+                        # default="configs/ae/Unet.yaml",
                         # default="configs/ae/ConvAE.yaml",
                         # default="configs/ae/MLPAE.yaml",
                         # default="configs/gan/WGAN_GP.yaml",
