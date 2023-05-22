@@ -52,7 +52,7 @@ def get_opt():
                         help="Batch size.")
     parser.add_argument("--max_epochs", 
                         type=int, 
-                        default=200, 
+                        default=100, 
                         help="Epoch lenghts.")
     
     opt = parser.parse_args()
