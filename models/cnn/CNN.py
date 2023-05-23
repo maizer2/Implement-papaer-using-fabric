@@ -115,7 +115,7 @@ class LeNet5(nn.Module):
         return self.mlp_layers(self.conv_layers(x).view(x.size(0),-1))
         
         
-    def get_loss(self, batch):
+    def get_loss(self, batch, epoch):
         x, y = batch
         y_hat = self.model(x)
         loss = self.criterion(y_hat, y)
@@ -152,7 +152,7 @@ class AlexNet(nn.Module):
         return self.mlp_layers(self.conv_layers(x).view(x.size(0),-1))
        
            
-    def get_loss(self, batch):
+    def get_loss(self, batch, epoch):
         x, y = batch
         y_hat = self.model(x)
         loss = self.criterion(y_hat, y)
@@ -224,7 +224,7 @@ class VGGNet(nn.Module):
         return self.mlp_layers(self.conv_layers(x).view(x.size(0),-1))
        
            
-    def get_loss(self, batch):
+    def get_loss(self, batch, epoch):
         x, y = batch
         y_hat = self.model(x)
         loss = self.criterion(y_hat, y)
@@ -400,7 +400,7 @@ class ResNet(nn.Module):
         return self.mlp_layers(self.conv_layers(x).view(x.size(0), -1))
        
            
-    def get_loss(self, batch):
+    def get_loss(self, batch, epoch):
         x, y = batch
         y_hat = self.model(x)
         loss = self.criterion(y_hat, y)
@@ -424,19 +424,19 @@ class LitCNN(pl.LightningModule):
         
         
     def training_step(self, batch, batch_idx):
-        loss = self.model.get_loss(batch)
+        loss = self.model.get_loss(batch, self.current_epoch, self.device)
         self.log("train_loss", loss, sync_dist=True)
         return loss
     
     
     def validation_step(self, batch, batch_idx):
-        loss = self.model.get_loss(batch)
+        loss = self.model.get_loss(batch, self.current_epoch, self.device)
         self.log("val_loss", loss, sync_dist=True)
         return loss
         
     
     def test_step(self, batch, batch_idx):
-        loss = self.model.get_loss(batch)
+        loss = self.model.get_loss(batch, self.current_epoch, self.device)
         self.log("test_loss", loss, sync_dist=True)
         return loss
     

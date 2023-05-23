@@ -12,8 +12,6 @@ from torchvision import transforms
 from models.cnn.CNN import BasicConvNet, DeConvolution_layer, Convolution_layer
 from models.mlp.MLP import MultiLayerPerceptron
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 conv_configure= namedtuple("conv_config", ["model", 
                                            "in_channels", "out_channels", 
                                            "k", "s", "p", 
@@ -54,8 +52,8 @@ class VanilaGAN(nn.Module):
     
     def get_G_loss(self, batch, epoch):
         real, _ = batch
-        label_real = torch.ones((real.size(0), 1), device=device)
-        z = torch.randn((real.size(0), self.latent_dim), device=device, requires_grad=True)
+        label_real = torch.ones((real.size(0), 1), device=real.device)
+        z = torch.randn((real.size(0), self.latent_dim), device=real.device, requires_grad=True)
         
         fake = self(z)
         
@@ -67,9 +65,9 @@ class VanilaGAN(nn.Module):
         
     def get_D_loss(self, batch, epoch):
         real, _ = batch
-        label_real = torch.ones((real.size(0), 1), device=device)
-        label_fake = torch.zeros((real.size(0), 1), device=device)
-        z = torch.randn((real.size(0), self.latent_dim), device=device, requires_grad=True)
+        label_real = torch.ones((real.size(0), 1), device=real.device)
+        label_fake = torch.zeros((real.size(0), 1), device=real.device)
+        z = torch.randn((real.size(0), self.latent_dim), device=real.device, requires_grad=True)
         
         fake = self(z)
         
@@ -120,8 +118,8 @@ class DCGAN(nn.Module):
     
     def get_G_loss(self, batch, epoch):
         real, _ = batch
-        label_real = torch.ones((real.size(0), 1), device=device)
-        z = torch.randn((real.size(0), self.latent_dim, 1, 1), device=device)
+        label_real = torch.ones((real.size(0), 1), device=real.device)
+        z = torch.randn((real.size(0), self.latent_dim, 1, 1), device=real.device)
         
         fake = self(z)
         
@@ -134,9 +132,9 @@ class DCGAN(nn.Module):
         
     def get_D_loss(self, batch, epoch):
         real, _ = batch
-        label_real = torch.ones((real.size(0), 1), device=device)
-        label_fake = torch.zeros((real.size(0), 1), device=device)
-        z = torch.randn((real.size(0), self.latent_dim, 1, 1), device=device, requires_grad=True)
+        label_real = torch.ones((real.size(0), 1), device=real.device)
+        label_fake = torch.zeros((real.size(0), 1), device=real.device)
+        z = torch.randn((real.size(0), self.latent_dim, 1, 1), device=real.device, requires_grad=True)
         
         fake = self(z)
         
@@ -177,9 +175,9 @@ class CGAN(nn.Module):
     
     def get_G_loss(self, batch, epoch):
         real, _ = batch
-        label_real = torch.ones((real.size(0), 1), device=device)
-        z = torch.randn((real.size(0), self.latent_dim), device=device, requires_grad=True)
-        condition = self.embedding(torch.randint(0, 9, (real.size(0), ), device=device))
+        label_real = torch.ones((real.size(0), 1), device=real.device)
+        z = torch.randn((real.size(0), self.latent_dim), device=real.device, requires_grad=True)
+        condition = self.embedding(torch.randint(0, 9, (real.size(0), ), device=real.device))
         
         fake = self(z, condition)
         
@@ -193,10 +191,10 @@ class CGAN(nn.Module):
         
     def get_D_loss(self, batch, epoch):
         real, _ = batch
-        label_real = torch.ones((real.size(0), 1), device=device)
-        label_fake = torch.zeros((real.size(0), 1), device=device)
-        z = torch.randn((real.size(0), self.latent_dim), device=device, requires_grad=True)
-        condition = self.embedding(torch.randint(0, 9, (real.size(0), ), device=device))
+        label_real = torch.ones((real.size(0), 1), device=real.device)
+        label_fake = torch.zeros((real.size(0), 1), device=real.device)
+        z = torch.randn((real.size(0), self.latent_dim), device=real.device, requires_grad=True)
+        condition = self.embedding(torch.randint(0, 9, (real.size(0), ), device=real.device))
         
         fake = self(z, condition)
         
@@ -210,7 +208,6 @@ class CGAN(nn.Module):
         return loss_d.requires_grad_(True)
     
     
-
 class WGAN(nn.Module):
     def __init__(self, 
                  latent_dim, 
@@ -251,7 +248,7 @@ class WGAN(nn.Module):
     def get_G_loss(self, batch, epoch):
         if epoch % 5 == 0:
             real, _ = batch
-            z = torch.randn((real.size(0), self.latent_dim, 1, 1), device=device)
+            z = torch.randn((real.size(0), self.latent_dim, 1, 1), device=real.device)
             
             fake = self.G(z)
             
@@ -265,7 +262,7 @@ class WGAN(nn.Module):
         
     def get_D_loss(self, batch, epoch):
         real, _ = batch
-        z = torch.randn((real.size(0), self.latent_dim, 1, 1), device=device)
+        z = torch.randn((real.size(0), self.latent_dim, 1, 1), device=real.device)
         
         fake = self.G(z).detach()
         
@@ -317,11 +314,11 @@ class WGAN_GP(nn.Module):
     def compute_gp(self, real_sample, fake_sample):
         """Calculates the gradient penalty loss for WGAN GP"""
         # Random weight term for interpolation between real and fake samples
-        alpha = torch.randn((real_sample.size(0), 1, 1, 1), device=device)
+        alpha = torch.randn((real_sample.size(0), 1, 1, 1), device=real_sample.device)
         # Get random interpolation between real and fake samples
         interpolates = (alpha * real_sample + ((1 - alpha) * fake_sample))
         d_interpolates = self.D(interpolates).requires_grad_(True)
-        fake = torch.ones((real_sample.size(0), 1, 1, 1), device=device)
+        fake = torch.ones((real_sample.size(0), 1, 1, 1), device=real_sample.device)
         # Get gradient w.r.t. interpolates
         gradients, *_ = torch.autograd.grad(d_interpolates, interpolates, fake, create_graph=True)
         gradients = gradients.view(gradients.size(0), -1)
@@ -332,7 +329,7 @@ class WGAN_GP(nn.Module):
     def get_G_loss(self, batch, epoch):
         if epoch % 5 == 0:
             real, _ = batch
-            z = torch.randn((real.size(0), self.latent_dim, 1, 1), device=device)
+            z = torch.randn((real.size(0), self.latent_dim, 1, 1), device=real.device)
             
             fake = self.G(z)
             
@@ -347,7 +344,7 @@ class WGAN_GP(nn.Module):
     def get_D_loss(self, batch, epoch):
         with torch.enable_grad():
             real, _ = batch
-            z = torch.randn((real.size(0), self.latent_dim, 1, 1), requires_grad=True, device=device)
+            z = torch.randn((real.size(0), self.latent_dim, 1, 1), requires_grad=True, device=real.device)
             
             fake = self.G(z)
             
@@ -360,8 +357,8 @@ class WGAN_GP(nn.Module):
         return loss_d.requires_grad_(True)
 
 
-    def forward(self):
-        return self.G(torch.randn((self.batch_size, self.latent_dim, 1, 1), device=device))
+    def forward(self, z):
+        return self.G(z)
     
 
 class WGAN_DIV(nn.Module):
@@ -397,18 +394,16 @@ class WGAN_DIV(nn.Module):
                                                          normalize=[None, nn.BatchNorm2d(128), nn.BatchNorm2d(256), nn.BatchNorm2d(512), None],
                                                          activation=[nn.LeakyReLU(), nn.LeakyReLU(), nn.LeakyReLU(), nn.LeakyReLU(), nn.Sigmoid()],
                                                          pooling=[None for _ in range(5)]
-                                                         ),
-                              image_shape=self.image_shape,
-                              output_shape="scalar")
+                                                         ))
     
     
     def compute_div_gp(self, real, fake):
-        real_out = torch.ones((real.size(0), 1), device=device)
+        real_out = torch.ones((real.size(0), 1), device=real.device)
         
         real_grad = torch.autograd(self.D(real), real, real_out, create_graph=True, retain_graph=True, only_inputs=True)[0]
         real_grad_norm = real_grad.view(real_grad.size(0), -1).pow(2).sum(1) ** (self.p / 2)
         
-        fake_out = torch.ones((real.size(0), 1), device=device)
+        fake_out = torch.ones((real.size(0), 1), device=real.device)
         
         fake_grad = torch.autograd(self.D(fake), fake, fake_out, create_graph=True, retain_graph=True, only_inputs=True)[0]
         fake_grad_norm = fake_grad.view(fake_grad.size(0), -1).pow(2).sum(1) ** (self.p / 2)
@@ -424,7 +419,7 @@ class WGAN_DIV(nn.Module):
     def get_G_loss(self, batch, epoch):
         if epoch % 5 == 0:
             real, _ = batch
-            z = torch.randn((real.size(0), self.latent_dim, 1, 1), device=device)
+            z = torch.randn((real.size(0), self.latent_dim, 1, 1), device=real.device)
             
             fake = self.G(z)
             
@@ -439,7 +434,7 @@ class WGAN_DIV(nn.Module):
     def get_D_loss(self, batch, epoch):
         with torch.enable_grad():
             real, _ = batch
-            z = torch.randn((real.size(0), self.latent_dim, 1, 1), device=device, requires_grad=True)
+            z = torch.randn((real.size(0), self.latent_dim, 1, 1), device=real.device, requires_grad=True)
             
             fake = self.G(z)
             

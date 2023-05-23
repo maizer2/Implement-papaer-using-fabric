@@ -5,8 +5,6 @@ import torch
 import torch.nn as nn
 import torch.optim as toptim
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 '''
 MLP
 Input 1x32x32
@@ -64,7 +62,7 @@ class MultiLayerPerceptron(nn.Module):
         return self.layers(x.view(x.size(0), -1))
     
     
-    def get_loss(self, batch):
+    def get_loss(self, batch, epoch):
         x, y = batch
         y_hat = self(x)
         loss = self.criterion(y_hat, y)
@@ -87,19 +85,19 @@ class LitMLP(pl.LightningModule):
     
     
     def training_step(self, batch, batch_idx):
-        loss = self.model.get_loss(batch)
+        loss = self.model.get_loss(batch, self.current_epoch, self.device)
         self.log("train_loss", loss, sync_dist=True)
         return loss
          
          
     def validation_step(self, batch, batch_idx):
-        loss = self.model.get_loss(batch)
+        loss = self.model.get_loss(batch, self.current_epoch, self.device)
         self.log( "val_loss", loss, sync_dist=True)
         return loss
     
     
     def test_step(self, batch, batch_idx):
-        loss = self.model.get_loss(batch)
+        loss = self.model.get_loss(batch, self.current_epoch, self.device)
         self.log("test_loss", loss, sync_dist=True)
         return loss
     

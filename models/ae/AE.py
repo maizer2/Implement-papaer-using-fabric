@@ -15,8 +15,6 @@ from torchvision.utils import make_grid
 from models.cnn.CNN import BasicConvNet, Convolution_layer, DeConvolution_layer
 from models.mlp.MLP import MultiLayerPerceptron
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 conv_configure= namedtuple("conv_config", ["model", 
                                            "in_channels", "out_channels", 
                                            "k", "s", "p", 
@@ -188,7 +186,7 @@ class Unet_diff(nn.Module):
         def forward(self, t):
             half_dim = self.n_channels // 8
             emb =  math.log(10_000) / (half_dim  - 1)
-            emb = torch.exp(torch.arange(half_dim, device=device) * -emb)
+            emb = torch.exp(torch.arange(half_dim, device=t.device) * -emb)
             emb = t[:, None] * emb[None, :]
             emb = torch.cat((emb.sin(), emb.cos()), 1)
             
@@ -204,7 +202,7 @@ class Unet_diff(nn.Module):
                      out_channels,
                      time_channels,
                      n_groups = 32,
-                     dropout = 0.1):
+                     dropout = 0.1,):
             super().__init__()
             
             self.norm1 = nn.GroupNorm(n_groups, in_channels)
@@ -262,7 +260,7 @@ class Unet_diff(nn.Module):
             qkv = self.projection(x).view(batch_size, -1, self.n_heads, 3* self.d_k)
             q, k, v = torch.chunk(qkv, 3, -1)
             
-            attn = torch.einsum('bihd,hjhd->bijh', q, k)
+            attn = torch.einsum('bihd,hjhd->bijh', q, k) * self.scale
             attn = attn.softmax(2)
             
             res = torch.einsum('bijh, bjhd->bihd', attn, v)
@@ -352,7 +350,7 @@ class Unet_diff(nn.Module):
             return self.conv(x)
             
             
-    def __init__(self, 
+    def __init__(self,
                  image_channel,
                  image_size,
                  n_channels = 64,
@@ -360,6 +358,7 @@ class Unet_diff(nn.Module):
                  is_attn = [False, False, True, True],
                  n_blocks = 2):
         super().__init__()
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.image_channel = image_channel
         self.image_size = image_size
         
@@ -433,7 +432,7 @@ class Unet_diff(nn.Module):
     
     def get_loss(self, batch, epoch):
         x, _ = batch
-        x_hat = self(x.requires_grad_(True))
+        x_hat = self(x)
         
         loss = self.criterion(x, x_hat)
         return loss
@@ -465,7 +464,7 @@ class LitAE(pl.LightningModule):
        
        
     def training_step(self, batch, batch_idx):
-        loss = self.model.get_loss(batch, self.current_epoch)
+        loss = self.model.get_loss(batch, self.current_epoch, self.device)
         self.log("train_loss", loss, prog_bar=True, sync_dist=True)
         return loss
     
@@ -480,7 +479,7 @@ class LitAE(pl.LightningModule):
     
     
     def validation_step(self, batch, batch_idx):
-        loss = self.model.get_loss(batch, self.current_epoch)
+        loss = self.model.get_loss(batch, self.current_epoch, self.device)
         self.log("val_loss", loss, prog_bar=True, sync_dist=True)
         return loss
     
@@ -496,7 +495,7 @@ class LitAE(pl.LightningModule):
     
     
     def test_step(self, batch, batch_idx):
-        loss = self.model.get_loss(batch, self.current_epoch)
+        loss = self.model.get_loss(batch, self.current_epoch, self.device)
         self.log("test_loss", loss, prog_bar=True, sync_dist=True)
         return loss
     
