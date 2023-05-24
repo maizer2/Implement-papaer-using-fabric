@@ -260,7 +260,7 @@ class Unet_diff(nn.Module):
             qkv = self.projection(x).view(batch_size, -1, self.n_heads, 3* self.d_k)
             q, k, v = torch.chunk(qkv, 3, -1)
             
-            attn = torch.einsum('bihd,hjhd->bijh', q, k) * self.scale
+            attn = torch.einsum('bihd,bjhd->bijh', q, k) * self.scale
             attn = attn.softmax(2)
             
             res = torch.einsum('bijh, bjhd->bihd', attn, v)

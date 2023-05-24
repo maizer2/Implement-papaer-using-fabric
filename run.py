@@ -113,7 +113,7 @@ if __name__ == "__main__":
     
     trainer = pl.Trainer(max_epochs=opt.max_epochs,
                          default_root_dir=get_log_path(config),
-                         strategy='ddp_find_unused_parameters_false'
+                         strategy='ddp_find_unused_parameters_true'
                         #  callbacks=[EarlyStopping(monitor="val_loss", mode="min")]
                          )
     

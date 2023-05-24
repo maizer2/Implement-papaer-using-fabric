@@ -46,7 +46,15 @@ class DDPM(nn.Module):
         self.alpha = 1. - self.beta
         self.alpha_bar = torch.cumprod(self.alpha, 0)
         self.sigma2 = self.beta
-            
+    
+    
+    def set_variable_device(self, device):
+        self.beta = self.beta.to(device)
+        self.alpha = self.alpha.to(device)
+        self.alpha_bar = self.alpha_bar.to(device)
+        self.sigma2 = self.sigma2.to(device)
+        
+        
     def gather(self, consts, t):
         c = torch.gather(consts, -1, t)
         # c = consts.gather(-1, t)
@@ -84,31 +92,26 @@ class DDPM(nn.Module):
         return mean + torch.sqrt(var) * eps
     
     
-    def forward(self):
+    def forward(self, z):
         with torch.no_grad():
-            # $x_T \sim p(x_T) = \mathcal{N}(x_T; \mathbf{0}, \mathbf{I})$
-            x = torch.randn([self.n_samples, self.image_shape[0], self.image_shape[1], self.image_shape[2]],
-                            device=self.device)
-
             # Remove noise for $T$ steps
             for t_ in range(self.n_steps):
                 # $t$
                 t = self.n_steps - t_ - 1
                 # Sample from $\textcolor{lightgreen}{p_\theta}(x_{t-1}|x_t)$
-                x = self.p_sample(x, x.new_full((self.n_samples,), t, dtype=torch.long, device=x.device))
+                x = self.p_sample(z, z.new_full((self.n_samples,), t, dtype=torch.long, device=z.device))
         
         return x
     
     
     def get_loss(self, batch, epoch):
         x0, _ = batch
-        self.beta = self.beta.to(x0.device)
-        self.alpha_bar = self.alpha_bar.to(x0.device)
+        
         t = torch.randint(0, self.n_steps, (x0.size(0), ), device=x0.device, dtype=torch.long)
         noise = torch.randn_like(x0, device=x0.device)
         
-        xt = self.q_sample(x0, t, noise)
-        eps_theta = self.eps_model(xt, t)
+        xt = self.q_sample(x0.contiguous(), t.contiguous(), noise.contiguous())
+        eps_theta = self.eps_model(xt.contiguous(), t.contiguous())
         
         loss = self.criterion(noise, eps_theta)
 
@@ -150,22 +153,27 @@ class LitDiffusion(pl.LightningModule):
     
     
     def training_step(self, batch, batch_idx):
+        self.model.set_variable_device(self.device)
         loss = self.model.get_loss(batch, self.current_epoch)
         self.log("train_loss", loss, prog_bar=True, sync_dist=True)
         return loss
     
     
     def on_train_batch_end(self, outputs, batch: Any, batch_idx: int):
+        z = torch.randn([self.model.n_samples, self.model.image_shape[0], self.model.image_shape[1], self.model.image_shape[2]],
+                        device=self.device)
         
-        self.logger.experiment.add_image("x_hat", get_grid(self.model(), self.model.image_shape), self.current_epoch)
+        self.logger.experiment.add_image("x_hat", get_grid(self.model(z), self.model.image_shape), self.current_epoch)
     
     
     def validation_step(self, batch, batch_idx):
+        self.model.set_variable_device(self.device)
         loss = self.model.get_loss(batch, self.current_epoch)
         self.log("val_loss", loss, prog_bar=True, sync_dist=True)
         return loss
     
     def test_step(self, batch, batch_idx):
+        self.model.set_variable_device(self.device)
         loss = self.model.get_loss(batch, self.current_epoch)
         self.log("test_loss", loss, prog_bar=True, sync_dist=True)
         return loss
