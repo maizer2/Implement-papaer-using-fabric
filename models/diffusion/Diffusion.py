@@ -15,14 +15,6 @@ from models.cnn.CNN import BasicConvNet, DeConvolution_layer, Convolution_layer
 from models.mlp.MLP import MultiLayerPerceptron
 from run import get_obj_from_str
 
-
-def get_grid(tensor, image_shape):
-        
-    if len(tensor.shape) == 2:
-        tensor = tensor.view(tensor.size(0), image_shape[0], image_shape[1], image_shape[2])
-    
-    return make_grid(tensor, normalize=True)
-
     
 class DDPM(nn.Module):
     def __init__(self,
@@ -120,12 +112,19 @@ class DDPM(nn.Module):
 
 class DDIM(nn.Module):
     def __init__(self,
+                 eps_model_name:str,
+                 eps_model_args:dict,
                  image_channel=3,
-                 image_size=32):
+                 image_size=32,
+                 n_samples=16):
         super().__init__()
         self.image_shape = (image_channel, image_size, image_size)
         self.criterion = nn.MSELoss()
         
+        eps_model_args.update({"image_channel": image_channel, "image_size": image_size})
+        self.eps_model = get_obj_from_str(eps_model_name)(**eps_model_args)
+        
+        self.n_steps = n_steps
     
     def forward(self, x):
         pass
@@ -147,6 +146,14 @@ class LitDiffusion(pl.LightningModule):
         self.model = getattr(importlib.import_module(__name__), model_name)(**model_args)
         
         
+    def get_grid(self, tensor, image_shape):
+        
+        if len(tensor.shape) == 2:
+            tensor = tensor.view(tensor.size(0), image_shape[0], image_shape[1], image_shape[2])
+        
+        return make_grid(tensor, normalize=True)
+    
+    
     def configure_optimizers(self):
         optim = self.optimizer(self.model.eps_model.parameters(), self.lr)
         return optim
@@ -163,7 +170,7 @@ class LitDiffusion(pl.LightningModule):
         z = torch.randn([self.model.n_samples, self.model.image_shape[0], self.model.image_shape[1], self.model.image_shape[2]],
                         device=self.device)
         
-        self.logger.experiment.add_image("x_hat", get_grid(self.model(z), self.model.image_shape), self.current_epoch)
+        self.logger.experiment.add_image("x_hat", self.get_grid(self.model(z), self.model.image_shape), self.current_epoch)
     
     
     def validation_step(self, batch, batch_idx):
@@ -172,8 +179,26 @@ class LitDiffusion(pl.LightningModule):
         self.log("val_loss", loss, prog_bar=True, sync_dist=True)
         return loss
     
+    
     def test_step(self, batch, batch_idx):
         # self.model.set_variable_device(self.device)
         loss = self.model.get_loss(batch, self.current_epoch)
         self.log("test_loss", loss, prog_bar=True, sync_dist=True)
         return loss
+    
+    
+    def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> Any:
+        z = torch.randn([self.model.n_samples, self.model.image_shape[0], self.model.image_shape[1], self.model.image_shape[2]],
+                        device=self.device)
+        
+        x_hat = self.model(z)
+        return x_hat
+    
+    
+    def on_predict_batch_end(self, outputs, batch, batch_idx, dataloader_idx=0):
+        out_path = os.path.join(self.trainer.log_dir, "output_predict")
+        os.makedirs(out_path, exist_ok=True)
+        
+        x_hat_grid = self.get_grid(outputs, outputs.shape)
+        x_hat_PIL = transforms.ToPILImage()(x_hat_grid)
+        x_hat_PIL.save(os.path.join(out_path, f"{batch_idx}.png"))

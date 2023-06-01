@@ -5,6 +5,7 @@ from omegaconf import OmegaConf
 import lightning as L
 import lightning.pytorch as pl
 from lightning.pytorch.callbacks.early_stopping import EarlyStopping
+
 import torch
 import torch.nn as nn
 from torch.utils import data
@@ -16,6 +17,9 @@ torch.set_float32_matmul_precision('medium')
         
 def get_opt():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--inference", 
+                        action="store_true",
+                        help="When inferring the model")
     parser.add_argument("--config", 
                         type=str, 
                         default="configs/diffusion/DDPM.yaml",
@@ -54,6 +58,10 @@ def get_opt():
                         type=int, 
                         default=100, 
                         help="Epoch lenghts.")
+    parser.add_argument("--out_path",
+                        type=str,
+                        default="./",
+                        help="Generation model output path")
     
     opt = parser.parse_args()
     return opt
@@ -114,15 +122,21 @@ if __name__ == "__main__":
     trainer = pl.Trainer(max_epochs=opt.max_epochs,
                          default_root_dir=get_log_path(config),
                          strategy='ddp_find_unused_parameters_true'
-                        #  callbacks=[EarlyStopping(monitor="val_loss", mode="min")]
+                         # callbacks=[EarlyStopping(monitor="val_loss", mode="min")]
                          )
     
-    trainer.fit(model=model,
-                train_dataloaders=train_loader,
-                val_dataloaders=val_loader,
-                ckpt_path=opt.ckpt_path
-                )
-    
-    trainer.test(model=model,
-                 dataloaders=test_loader
-                 )
+    if not opt.inference:
+        trainer.fit(model=model,
+                    train_dataloaders=train_loader,
+                    val_dataloaders=val_loader,
+                    ckpt_path=opt.ckpt_path)
+        
+        trainer.test(model=model,
+                     dataloaders=test_loader)
+        
+    else:
+        model.eval()
+        trainer.predict(model=model, 
+                        dataloaders=test_loader,
+                        ckpt_path=opt.ckpt_path)
+        
