@@ -5,11 +5,12 @@ model:
     lr: 1e-3
     model_name: MultiLayerPerceptron
     model_args:
+      image_channel: 1
+      image_size: 32
       in_features: 1024
       out_features: 10
   
 data:
+  data_name: MNIST
   image_mean: 0.5
   image_std: 0.5
-  image_channel: 1
-  image_size: 32

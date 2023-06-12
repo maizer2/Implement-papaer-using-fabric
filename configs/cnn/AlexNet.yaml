@@ -10,5 +10,6 @@ model:
       out_features: 10
   
 data:
+  data_name: MNIST
   image_mean: 0.5
   image_std: 0.5

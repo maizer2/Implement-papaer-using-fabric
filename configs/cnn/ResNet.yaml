@@ -11,5 +11,6 @@ model:
       res_layers: 152 #18, 34, 50, 101, 152
   
 data:
+  data_name: MNIST
   image_mean: 0.5
   image_std: 0.5
