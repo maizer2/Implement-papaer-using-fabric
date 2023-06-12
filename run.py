@@ -22,14 +22,14 @@ def get_opt():
                         help="When inferring the model")
     parser.add_argument("--config", 
                         type=str, 
-                        default="configs/diffusion/DDPM.yaml",
+                        # default="configs/diffusion/DDPM.yaml",
                         # default="configs/ae/Unet.yaml",
                         # default="configs/ae/ConvAE.yaml",
                         # default="configs/ae/MLPAE.yaml",
                         # default="configs/gan/WGAN_GP.yaml",
                         # default="configs/gan/WGAN.yaml",
                         # default="configs/gan/CGAN.yaml",
-                        # default="configs/gan/DCGAN.yaml",
+                        default="configs/gan/DCGAN.yaml",
                         # default="configs/gan/VanilaGAN.yaml",
                         # default="configs/cnn/ResNet.yaml",
                         # default="configs/cnn/VGGNet.yaml",
@@ -73,12 +73,15 @@ def get_dataloader(opt, config, transform=None):
                                         transforms.Normalize((config.data.image_mean, ), (config.data.image_std, )),
                                         transforms.Resize(config.model.params.model_args.image_size, antialias=True)
                                         ])
-        
-    train_dataset = datasets.MNIST(opt.data_path, download=True, transform=transform)
+    train_dataset = getattr(importlib.import_module("torchvision.datasets"), config.data.data_name)(root=opt.data_path, 
+                                                                                                    download=True, 
+                                                                                                    transform=transform)
     
     train_dataset, val_dataset = data.random_split(train_dataset, [int(len(train_dataset) * 0.8), len(train_dataset) - int(len(train_dataset) * 0.8)])
-    test_dataset = datasets.MNIST(opt.data_path, download=True, train=False, transform=transform)
-    
+    test_dataset = getattr(importlib.import_module("torchvision.datasets"), config.data.data_name)(root=opt.data_path, 
+                                                                                                    download=True,
+                                                                                                    train=False,
+                                                                                                    transform=transform)
     train_loader = data.DataLoader(train_dataset, 
                               batch_size=opt.batch_size, 
                               num_workers=opt.num_workers

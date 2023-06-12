@@ -127,14 +127,13 @@ class DCGAN(nn.Module):
         
         loss_g = self.criterion(pred_fake, label_real)
         return loss_g.requires_grad_(True)
-        # return loss_g
         
         
     def get_D_loss(self, batch, epoch):
         real, _ = batch
         label_real = torch.ones((real.size(0), 1), device=real.device)
         label_fake = torch.zeros((real.size(0), 1), device=real.device)
-        z = torch.randn((real.size(0), self.latent_dim, 1, 1), device=real.device, requires_grad=True)
+        z = torch.randn((real.size(0), self.latent_dim, 1, 1), device=real.device)
         
         fake = self(z)
         
@@ -142,7 +141,7 @@ class DCGAN(nn.Module):
         pred_fake = self.D(fake).view(real.size(0), -1)
         
         loss_d = ( self.criterion(pred_real, label_real) + self.criterion(pred_fake, label_fake) ) / 2
-        return loss_d
+        return loss_d.requires_grad_(True)
     
     
 class CGAN(nn.Module):
@@ -506,7 +505,8 @@ class LitGAN(pl.LightningModule):
     
     
     def on_train_batch_end(self, outputs, batch: Any, batch_idx: int):
-        self.logger.experiment.add_image("fake", get_grid(self.model(), self.model.image_shape), self.current_epoch)
+        z = torch.randn((batch[0].size(0), self.model.latent_dim, 1, 1), device=batch[0].device)
+        self.logger.experiment.add_image("fake", get_grid(self.model(z), self.model.image_shape), self.current_epoch)
     
     
     def validation_step(self, batch, batch_idx):

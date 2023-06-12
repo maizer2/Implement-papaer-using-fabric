@@ -6,9 +6,10 @@ model:
     model_name: DCGAN
     model_args:
       latent_dim: 100
-      image_channel: 1
+      image_channel: 3
       image_size: 64
   
 data:
+  data_name: CIFAR10
   image_mean: 0.5
   image_std: 0.5

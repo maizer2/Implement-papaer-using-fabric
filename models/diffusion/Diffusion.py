@@ -116,6 +116,7 @@ class DDIM(nn.Module):
                  eps_model_args:dict,
                  image_channel=3,
                  image_size=32,
+                 n_steps=1_000,
                  n_samples=16):
         super().__init__()
         self.image_shape = (image_channel, image_size, image_size)
@@ -125,7 +126,9 @@ class DDIM(nn.Module):
         self.eps_model = get_obj_from_str(eps_model_name)(**eps_model_args)
         
         self.n_steps = n_steps
+        self.n_samples = n_samples
     
+        
     def forward(self, x):
         pass
     
