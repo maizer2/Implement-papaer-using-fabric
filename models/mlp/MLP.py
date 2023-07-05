@@ -34,7 +34,9 @@ class SinglePerceptron(nn.Module):
 
 
 class MultiLayerPerceptron(nn.Module):
-    def __init__(self, 
+    def __init__(self,
+                 image_channel = 1,
+                 image_size = 32,
                  in_features = None,
                  out_features = None,
                  normalize = None,

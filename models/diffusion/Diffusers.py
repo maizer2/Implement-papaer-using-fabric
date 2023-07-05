@@ -1,6 +1,7 @@
 import importlib, os
 from collections import namedtuple
 from typing import Any, Optional
+from tqdm import tqdm
 
 import lightning.pytorch as pl
 from lightning.pytorch.utilities.types import STEP_OUTPUT
@@ -15,98 +16,74 @@ from models.cnn.CNN import BasicConvNet, DeConvolution_layer, Convolution_layer
 from models.mlp.MLP import MultiLayerPerceptron
 from run import get_obj_from_str
 
-    
+from diffusers import DDPMPipeline, DDPMScheduler, DDIMPipeline, DDIMScheduler
+from diffusers.optimization import get_cosine_schedule_with_warmup
+
+
 class DDPM(nn.Module):
     def __init__(self,
                  eps_model_name:str,
                  eps_model_args:dict,
                  image_channel=3,
                  image_size=32,
-                 n_steps=1_000,
-                 n_samples=16):
+                 n_steps=1_000):
         super().__init__()
         self.image_shape = (image_channel, image_size, image_size)
         self.criterion = nn.MSELoss()
-        
-        eps_model_args.update({"image_channel": image_channel, "image_size": image_size})
-        self.eps_model = get_obj_from_str(eps_model_name)(**eps_model_args)
-        
         self.n_steps = n_steps
-        self.n_samples = n_samples
-    
-        self.beta = torch.linspace(0.0001, 0.02, n_steps)
         
+        eps_model_args.update({"sample_size": image_size, 
+                               "in_channels": image_channel,
+                               "out_channels": image_channel,
+                               "block_out_channels": (128, 128, 256, 256, 512, 512),
+                               "down_block_types": (
+                                    "DownBlock2D",  # a regular ResNet downsampling block
+                                    "DownBlock2D", 
+                                    "DownBlock2D", 
+                                    "DownBlock2D", 
+                                    "AttnDownBlock2D",  # a ResNet downsampling block with spatial self-attention
+                                    "DownBlock2D"),
+                                "up_block_types":(
+                                    "UpBlock2D",  # a regular ResNet upsampling block
+                                    "AttnUpBlock2D",  # a ResNet upsampling block with spatial self-attention
+                                    "UpBlock2D", 
+                                    "UpBlock2D", 
+                                    "UpBlock2D", 
+                                    "UpBlock2D")
+                               })
         
-    def gather(self, consts, t):
-        c = torch.gather(consts, -1, t)
-        # c = consts.gather(-1, t)
-        return c.reshape(-1, 1, 1, 1)
-    
-    
-    def q_xt_x0(self, x0, t, alpha_bar):
-        mean = torch.sqrt(self.gather(alpha_bar, t)) * x0
-        var = 1 - self.gather(alpha_bar, t)
-        return mean, var
-    
-    
-    def q_sample(self, x0, t, eps, alpha_bar):            
-        mean, var = self.q_xt_x0(x0, t, alpha_bar)
-        
-        return mean + (torch.sqrt(var)) * eps
-    
-    
-    def p_sample(self, xt, t, alpha):
-        alpha_bar = torch.cumprod(alpha, 0)
-        sigma2 = self.beta
-        
-        eps_theta = self.eps_model(xt, t)
-        
-        alpha = self.gather(alpha, t)
-        beta = 1 - alpha
-        
-        alpha_bar = self.gather(alpha_bar, t)
-        beta_bar = 1 - alpha_bar
-        
-        eps_coef = torch.div(beta, torch.sqrt(beta_bar))
-        
-        mean = torch.div(1, torch.sqrt(alpha)) * (xt - eps_coef * eps_theta)
-        var = self.gather(sigma2, t)
-        
-        eps = torch.randn_like(xt, device=xt.device)
-        
-        return mean + torch.sqrt(var) * eps
+        self.eps_model = get_obj_from_str(eps_model_name)(**eps_model_args)
+        self.scheduler = DDPMScheduler(n_steps)
+        self.pipeline = DDPMPipeline(unet=self.eps_model,
+                                     scheduler=self.scheduler)
     
     
-    def forward(self, z):
-        self.beta = self.beta.to(z.device)
-        alpha = 1. - self.beta
+    def forward(self, batch):
+        x0, _ = batch
+        noise = torch.randn(x0.shape)
+        timesteps = torch.FloatTensor([50])
+        xT = self.scheduler.add_noise(x0, noise, timesteps)
         
-        with torch.no_grad():
-            # Remove noise for $T$ steps
-            for t_ in range(self.n_steps):
-                # $t$
-                t = self.n_steps - t_ - 1
-                t = z.new_full((self.n_samples,), t, dtype=torch.long, device=z.device)
-                # Sample from $\textcolor{lightgreen}{p_\theta}(x_{t-1}|x_t)$
-                z = self.p_sample(z, t, alpha)
+        x0_hat = xT
+        for t in self.scheduler.timesteps:
+            with torch.no_grad():
+                noisy_x = self.eps_model(x0_hat, t).sample
+            previous_noisy_sample = self.scheduler.step(noisy_x, t, input).prev_sample
+            x0_hat = previous_noisy_sample
         
-        return z
+        return x0_hat
     
     
     def get_loss(self, batch, epoch):
-        
         x0, _ = batch
-        self.beta = self.beta.to(x0.device)
-        alpha = 1. - self.beta
-        alpha_bar = torch.cumprod(alpha, 0)
+        noise = torch.randn(x0.shape)
+        timesteps = torch.LongTensor([self.n_steps])
         
-        t = torch.randint(0, self.n_steps, (x0.size(0), ), device=x0.device, dtype=torch.long)
-        noise = torch.randn_like(x0, device=x0.device)
+        xT = self.scheduler.add_noise(x0, noise, timesteps)
+        print(xT.shape, noise.shape)
+        exit()
+        loss = self.criterion(xT, noise)
         
-        xt = self.q_sample(x0, t, noise, alpha_bar)
-        eps_theta = self.eps_model(xt, t)
-        loss = self.criterion(noise, eps_theta)
-
         return loss
 
 
@@ -136,14 +113,16 @@ class DDIM(nn.Module):
         pass
     
 
-class LitDiffusion(pl.LightningModule):
+class LitDiffusers(pl.LightningModule):
     def __init__(self,
                  lr: float,
+                 lr_warmup_steps: int,
                  optim_name: str,
                  model_name: str,
                  model_args: tuple) -> None:
         super().__init__()
         self.lr = lr
+        self.lr_warmup_steps = lr_warmup_steps
         self.optimizer = getattr(importlib.import_module("torch.optim"), optim_name)
         self.model = getattr(importlib.import_module(__name__), model_name)(**model_args)
         
@@ -158,8 +137,16 @@ class LitDiffusion(pl.LightningModule):
     
     def configure_optimizers(self):
         optim = self.optimizer(self.model.eps_model.parameters(), self.lr)
-        return optim
+        
+        scheduler = get_cosine_schedule_with_warmup(
+            optimizer=optim,
+            num_warmup_steps=self.lr_warmup_steps,
+            num_training_steps=(625 * self.trainer.max_epochs)
+        )
+        return {"optimizer":optim, 
+                "lr_scheduler":scheduler}
     
+        # return optim
     
     def training_step(self, batch, batch_idx):
         # self.model.set_variable_device(self.device)
@@ -169,10 +156,7 @@ class LitDiffusion(pl.LightningModule):
     
     
     def on_train_batch_end(self, outputs, batch: Any, batch_idx: int):
-        z = torch.randn([self.model.n_samples, self.model.image_shape[0], self.model.image_shape[1], self.model.image_shape[2]],
-                        device=self.device)
-        
-        self.logger.experiment.add_image("x_hat", self.get_grid(self.model(z), self.model.image_shape), self.current_epoch)
+        self.logger.experiment.add_image("x0_hat", self.get_grid(self.model(batch), self.model.image_shape), self.current_epoch)
     
     
     def validation_step(self, batch, batch_idx):
@@ -190,11 +174,8 @@ class LitDiffusion(pl.LightningModule):
     
     
     def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> Any:
-        z = torch.randn([self.model.n_samples, self.model.image_shape[0], self.model.image_shape[1], self.model.image_shape[2]],
-                        device=self.device)
-        
-        x_hat = self.model(z)
-        return x_hat
+        x0_hat = self.model(batch)
+        return x0_hat
     
     
     def on_predict_batch_end(self, outputs, batch, batch_idx, dataloader_idx=0):

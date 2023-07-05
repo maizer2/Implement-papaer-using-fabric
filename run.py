@@ -22,6 +22,7 @@ def get_opt():
                         help="When inferring the model")
     parser.add_argument("--config", 
                         type=str, 
+                        default="configs/diffusion/Diffusers_DDPM.yaml",
                         # default="configs/diffusion/DDPM.yaml",
                         # default="configs/ae/Unet.yaml",
                         # default="configs/ae/ConvAE.yaml",
@@ -29,7 +30,7 @@ def get_opt():
                         # default="configs/gan/WGAN_GP.yaml",
                         # default="configs/gan/WGAN.yaml",
                         # default="configs/gan/CGAN.yaml",
-                        default="configs/gan/DCGAN.yaml",
+                        # default="configs/gan/DCGAN.yaml",
                         # default="configs/gan/VanilaGAN.yaml",
                         # default="configs/cnn/ResNet.yaml",
                         # default="configs/cnn/VGGNet.yaml",
@@ -124,7 +125,8 @@ if __name__ == "__main__":
     
     trainer = pl.Trainer(max_epochs=opt.max_epochs,
                          default_root_dir=get_log_path(config),
-                         strategy='ddp_find_unused_parameters_true'
+                         strategy='ddp_find_unused_parameters_true',
+                         devices=[7]
                          # callbacks=[EarlyStopping(monitor="val_loss", mode="min")]
                          )
     
