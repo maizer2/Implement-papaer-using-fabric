@@ -1,2 +1,20 @@
 model:
-  target
+  target: models.diffusion.Diffusers.LitDiffusers
+  params:
+    lr: 1e-4
+    lr_warmup_steps: 500
+    optim_name: Adam
+    model_name: DDIM
+    model_args:
+      image_channel: 3
+      image_size: 32
+      F_n_steps: 1000
+      R_n_steps: 50
+      eps_model_name: diffusers.UNet2DModel
+      eps_model_args:
+        layers_per_block: 2
+
+data:
+  data_name: CIFAR10
+  image_mean: 0.5
+  image_std: 0.5

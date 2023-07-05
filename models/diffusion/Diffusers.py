@@ -54,21 +54,19 @@ class DDPM(nn.Module):
         
         self.eps_model = get_obj_from_str(eps_model_name)(**eps_model_args)
         self.scheduler = DDPMScheduler(n_steps)
-        self.pipeline = DDPMPipeline(unet=self.eps_model,
-                                     scheduler=self.scheduler)
-    
+            
     
     def forward(self, batch):
         x0, _ = batch
-        noise = torch.randn(x0.shape)
-        timesteps = torch.FloatTensor([50])
+        noise = torch.randn(x0.shape).cuda()
+        timesteps = torch.randint(0, self.n_steps, (x0.size(0), ), device=x0.device, dtype=torch.long)
+        
         xT = self.scheduler.add_noise(x0, noise, timesteps)
         
         x0_hat = xT
         for t in self.scheduler.timesteps:
-            with torch.no_grad():
-                noisy_x = self.eps_model(x0_hat, t).sample
-            previous_noisy_sample = self.scheduler.step(noisy_x, t, input).prev_sample
+            noisy_x = self.eps_model(x0_hat, t).sample
+            previous_noisy_sample = self.scheduler.step(noisy_x, t, x0_hat).prev_sample
             x0_hat = previous_noisy_sample
         
         return x0_hat
@@ -76,15 +74,13 @@ class DDPM(nn.Module):
     
     def get_loss(self, batch, epoch):
         x0, _ = batch
-        noise = torch.randn(x0.shape)
-        timesteps = torch.LongTensor([self.n_steps])
+        noise = torch.randn(x0.shape).cuda()
+        timesteps = torch.randint(0, self.n_steps, (x0.size(0), ), device=x0.device, dtype=torch.long)
         
         xT = self.scheduler.add_noise(x0, noise, timesteps)
-        print(xT.shape, noise.shape)
-        exit()
-        loss = self.criterion(xT, noise)
+        loss = self.criterion(noise, xT)
         
-        return loss
+        return loss.requires_grad_(True)
 
 
 class DDIM(nn.Module):
@@ -93,24 +89,67 @@ class DDIM(nn.Module):
                  eps_model_args:dict,
                  image_channel=3,
                  image_size=32,
-                 n_steps=1_000,
-                 n_samples=16):
+                 F_n_steps=1_000,
+                 R_n_steps=50):
         super().__init__()
         self.image_shape = (image_channel, image_size, image_size)
         self.criterion = nn.MSELoss()
+        self.F_n_steps = F_n_steps
+        self.R_n_steps = R_n_steps
         
-        eps_model_args.update({"image_channel": image_channel, "image_size": image_size})
+        eps_model_args.update({"sample_size": image_size, 
+                               "in_channels": image_channel,
+                               "out_channels": image_channel,
+                               "block_out_channels": (128, 128, 256, 256, 512, 512),
+                               "down_block_types": (
+                                    "DownBlock2D",  # a regular ResNet downsampling block
+                                    "DownBlock2D", 
+                                    "DownBlock2D", 
+                                    "DownBlock2D", 
+                                    "AttnDownBlock2D",  # a ResNet downsampling block with spatial self-attention
+                                    "DownBlock2D"),
+                                "up_block_types":(
+                                    "UpBlock2D",  # a regular ResNet upsampling block
+                                    "AttnUpBlock2D",  # a ResNet upsampling block with spatial self-attention
+                                    "UpBlock2D", 
+                                    "UpBlock2D", 
+                                    "UpBlock2D", 
+                                    "UpBlock2D")
+                               })
+        
         self.eps_model = get_obj_from_str(eps_model_name)(**eps_model_args)
+        self.scheduler = DDIMScheduler(F_n_steps, rescale_betas_zero_snr=True, timestep_spacing="trailing")
         
-        self.n_steps = n_steps
-        self.n_samples = n_samples
+    
+    def forward(self, batch):
+        x0, _ = batch
+        noise = torch.randn(x0.shape).cuda()
+        timesteps = torch.randint(0, self.F_n_steps, (x0.size(0), ), device=x0.device, dtype=torch.long)
         
-    def forward(self, x):
-        pass
+        self.scheduler.set_timesteps(self.F_n_steps)
+        xT = self.scheduler.add_noise(x0, noise, timesteps)
+        
+        self.scheduler.set_timesteps(self.R_n_steps)
+        x0_hat = xT
+        for t in self.scheduler.timesteps:
+            noisy_x = self.eps_model(x0_hat, t).sample
+            previous_noisy_sample = self.scheduler.step(noisy_x, t, x0_hat).prev_sample
+            x0_hat = previous_noisy_sample
+        
+        return x0_hat
     
     
-    def get_loss(self, batch):
-        pass
+    def get_loss(self, batch, epoch):
+        x0, _ = batch
+        noise = torch.randn(x0.shape).cuda()
+        timesteps = torch.randint(0, self.F_n_steps, (x0.size(0), ), device=x0.device, dtype=torch.long)
+        
+        self.scheduler.set_timesteps(self.F_n_steps)
+        xT = self.scheduler.add_noise(x0, noise, timesteps)
+        
+        loss = self.criterion(noise, xT)
+        
+        return loss.requires_grad_(True)
     
 
 class LitDiffusers(pl.LightningModule):
@@ -141,7 +180,7 @@ class LitDiffusers(pl.LightningModule):
         scheduler = get_cosine_schedule_with_warmup(
             optimizer=optim,
             num_warmup_steps=self.lr_warmup_steps,
-            num_training_steps=(625 * self.trainer.max_epochs)
+            num_training_steps=(40000 * self.trainer.max_epochs)
         )
         return {"optimizer":optim, 
                 "lr_scheduler":scheduler}

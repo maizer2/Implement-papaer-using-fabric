@@ -22,7 +22,8 @@ def get_opt():
                         help="When inferring the model")
     parser.add_argument("--config", 
                         type=str, 
-                        default="configs/diffusion/Diffusers_DDPM.yaml",
+                        default="configs/diffusion/Diffusers_DDIM.yaml",
+                        # default="configs/diffusion/Diffusers_DDPM.yaml",
                         # default="configs/diffusion/DDPM.yaml",
                         # default="configs/ae/Unet.yaml",
                         # default="configs/ae/ConvAE.yaml",
@@ -53,7 +54,7 @@ def get_opt():
                         help="Number of DataLoader worker.")
     parser.add_argument("--batch_size", 
                         type=int, 
-                        default=64, 
+                        default=1, 
                         help="Batch size.")
     parser.add_argument("--max_epochs", 
                         type=int, 

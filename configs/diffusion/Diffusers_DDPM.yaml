@@ -7,7 +7,7 @@ model:
     model_name: DDPM
     model_args:
       image_channel: 3
-      image_size: 256
+      image_size: 32
       n_steps: 1000
       eps_model_name: diffusers.UNet2DModel
       eps_model_args:
