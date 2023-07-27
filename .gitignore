@@ -5,3 +5,5 @@ hparams.yaml
 *.ckpt
 *.png
 output
+*.jpg
+*.png
