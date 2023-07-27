@@ -4,3 +4,4 @@ events*
 hparams.yaml
 *.ckpt
 *.png
+output

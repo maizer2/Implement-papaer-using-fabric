@@ -1,0 +1,12 @@
+model:
+  target: models.vae.VAE.LitVAE
+  params:
+    lr: 1e-4
+    sampling_step: 10
+    optim_name: Adam
+    model_name: VQ_VAE
+    model_args:
+      sample_size: [256, 192]
+      in_channels: 4
+      out_channels: 4
+      num_sampling: 3

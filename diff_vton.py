@@ -21,14 +21,12 @@ torch.set_float32_matmul_precision('medium')
 
 def get_opt():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--inference", 
-                        action="store_true",
-                        help="When inferring the model")
     parser.add_argument("--config", 
                         type=str, 
                         # default="configs/diffusion/Diffusers_LDM.yaml",
                         # default="configs/diffusion/Diffusers_UnconditionalLDM.yaml",
-                        default="configs/diffusion/Diffusers_DDPM.yaml",
+                        default="configs/diffusion/Diffusers_DDIM.yaml",
+                        # default="configs/diffusion/Diffusers_DDPM.yaml",
                         # default="configs/diffusion/DDPM.yaml",
                         # default="configs/vae/VQ-VAE.yaml",
                         # default="configs/ae/Unet.yaml",
@@ -45,42 +43,21 @@ def get_opt():
                         # default="configs/cnn/LeNet5.yaml", 
                         # default="configs/mlp/MLP.yaml",
                         help="Path of model config file.")
-    parser.add_argument("--ckpt_path", 
-                        type=str, 
-                        default=None,
-                        help="Path of ckpt.")
-    parser.add_argument("--max_epochs", 
-                        type=int, 
-                        default=100000, 
-                        help="Epoch lenghts.")
     parser.add_argument("--out_path",
                         type=str,
                         default="./",
                         help="Generation model output path")
     
     # Dataset opt
-    parser.add_argument("--num_workers", 
-                        type=tuple, 
-                        default=6, 
-                        help="Number of DataLoader worker.")
     parser.add_argument("--data_name", 
                         type=str, 
                         default="CIFAR10", 
                         help="Torchvision dataset name.")
     parser.add_argument("--data_path", 
                         type=str, 
-                        default="data",
-                        # default="data/VITON/",
+                        # default="data",
+                        default="data/VITON/",
                         help="Path of dataset.")
-    parser.add_argument("--batch_size", 
-                        type=int, 
-                        default=1024, 
-                        help="Batch size.")
-    parser.add_argument("--image_size", 
-                        type=Optional[Union[tuple, list, int]], 
-                        default=32, 
-                        # default=(256,192),
-                        help="image mean.")
     parser.add_argument("--image_mean", 
                         type=float, 
                         default=0.5, 
@@ -89,6 +66,39 @@ def get_opt():
                         type=float, 
                         default=0.5, 
                         help="image std.")
+    
+    
+    # cp-vton arguments
+    parser.add_argument("--stage", default = "TOM", help="GMM or TOM")
+    parser.add_argument("--model_name", default="DDIM", help="DDPM, DDIM, StableDiffusion, etc.")
+    parser.add_argument("--radius", type=int, default = 5)
+    parser.add_argument("--grid_size", type=int, default = 5)
+    parser.add_argument('--lr', type=float, default=0.0001, help='initial learning rate for adam')
+    
+    
+    # dataset arguments
+    parser.add_argument("--dataroot", default = "data")
+    parser.add_argument("--datamode", default = "train")
+    parser.add_argument("--data_list", default = "train_pairs.txt")
+    parser.add_argument("--image_size", type=tuple, default = (256, 192), help="Image size shape like (height, width)")
+    parser.add_argument("--img_size", type=tuple, default = (256, 192), help="Image size shape like (height, width)")
+    parser.add_argument('--batch_size', type=int, default=32)
+    parser.add_argument('--num_workers', type=int, default=6)
+    parser.add_argument('--num_sampling', type=int, default=3)
+    
+    
+    
+    # lightning arguments
+    parser.add_argument("--inference", action="store_true")
+    parser.add_argument("--max_epochs", type=int, default = 3_125_000)
+    parser.add_argument('--ckpt_path', type=str, default=None, help='model checkpoint for initialization')
+    
+    
+    # diffusion arguments
+    parser.add_argument("--eta", default=0.0)
+    parser.add_argument("--sampling_step", default=50)
+    parser.add_argument("--num_train_steps", default=1000)
+    parser.add_argument("--num_inference_steps", default=50)
     
     opt = parser.parse_args()
     return opt
@@ -145,12 +155,13 @@ def get_log_path(config):
 if __name__ == "__main__":
     opt = get_opt()
     config = OmegaConf.load(opt.config)
-    train_loader, val_loader, test_loader = get_dataloader(opt)
+    # train_loader, val_loader, test_loader = get_dataloader(opt)
     
-    # train_dataset = CPDataset(opt)
-    # train_loader = CPDataLoader(opt, train_dataset).get_loader()
+    train_dataset = CPDataset(opt)
+    train_loader = CPDataLoader(opt, train_dataset).get_loader()
     
-    model = instantiate_from_config(config.model)
+    from networks import Lit_VTON
+    model = Lit_VTON(opt)
     
     trainer = pl.Trainer(max_epochs=opt.max_epochs,
                          default_root_dir=get_log_path(config),
@@ -164,15 +175,17 @@ if __name__ == "__main__":
     if not opt.inference:
         trainer.fit(model=model,
                     train_dataloaders=train_loader,
-                    val_dataloaders=val_loader,
+                    # val_dataloaders=val_loader,
                     ckpt_path=opt.ckpt_path)
         
-        trainer.test(model=model,
-                     dataloaders=test_loader)
+    #     trainer.test(model=model,
+    #                  dataloaders=test_loader)
         
     else:
-        trainer.predict(model=model.eval(), 
-                        dataloaders=test_loader,
-                        # dataloaders=train_loader,
+        opt.ckpt_path = "checkpoints/diffusion/DDIM/lightning_logs/TOM_final.ckpt"
+        model.eval()
+        trainer.predict(model=model, 
+                        # dataloaders=test_loader,
+                        dataloaders=train_loader,
                         ckpt_path=opt.ckpt_path)
         

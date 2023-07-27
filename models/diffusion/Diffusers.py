@@ -1,172 +1,412 @@
 import importlib, os
-from collections import namedtuple
-from typing import Any, Optional
-from tqdm import tqdm
+from typing import Any, Optional, Union
 
 import lightning.pytorch as pl
-from lightning.pytorch.utilities.types import STEP_OUTPUT
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import torch.optim as toptim
 from torchvision.utils import make_grid
 from torchvision import transforms
 
-from models.cnn.CNN import BasicConvNet, DeConvolution_layer, Convolution_layer
-from models.mlp.MLP import MultiLayerPerceptron
-from run import get_obj_from_str
 
-from diffusers import DDPMPipeline, DDPMScheduler, DDIMPipeline, DDIMScheduler
-from diffusers.optimization import get_cosine_schedule_with_warmup
+def list_to_tuple(data):
+    if isinstance(data, list):
+        return tuple(data)
+    elif isinstance(data, int):
+        return (data, data)
+    return data
 
 
 class DDPM(nn.Module):
+
     def __init__(self,
-                 eps_model_name:str,
-                 eps_model_args:dict,
-                 image_channel=3,
-                 image_size=32,
-                 n_steps=1_000):
+                 scheduler_name: str = "DDPMScheduler",
+                 sample_size: Optional[Union[tuple, int]] = 32,
+                 in_channels: int = 3,
+                 out_channels: int = 3,
+                 num_train_steps = 1_000,
+                 num_inference_steps = 1_000,
+                 num_sampling = 1,
+                 eta: float = 0.0):
         super().__init__()
-        self.image_shape = (image_channel, image_size, image_size)
+        ## import DDPM library
+        from models.diffusion.pipeline.custom_DDPMPipeline import DDPMPipeline
+        from diffusers.models import UNet2DModel
+        
         self.criterion = nn.MSELoss()
-        self.n_steps = n_steps
         
-        eps_model_args.update({"sample_size": image_size, 
-                               "in_channels": image_channel,
-                               "out_channels": image_channel,
-                               "block_out_channels": (128, 128, 256, 256, 512, 512),
-                               "down_block_types": (
-                                    "DownBlock2D",  # a regular ResNet downsampling block
-                                    "DownBlock2D", 
-                                    "DownBlock2D", 
-                                    "DownBlock2D", 
-                                    "AttnDownBlock2D",  # a ResNet downsampling block with spatial self-attention
-                                    "DownBlock2D"),
-                                "up_block_types":(
-                                    "UpBlock2D",  # a regular ResNet upsampling block
-                                    "AttnUpBlock2D",  # a ResNet upsampling block with spatial self-attention
-                                    "UpBlock2D", 
-                                    "UpBlock2D", 
-                                    "UpBlock2D", 
-                                    "UpBlock2D")
-                               })
+        self.num_sampling = num_sampling
+        self.num_train_steps = num_train_steps
+        self.num_inference_steps = num_inference_steps
+        self.eta = eta
         
-        self.eps_model = get_obj_from_str(eps_model_name)(**eps_model_args)
-        self.scheduler = DDPMScheduler(n_steps)
+        self.unet = UNet2DModel(sample_size=sample_size,
+                                in_channels=in_channels,
+                                out_channels=out_channels,
+                                down_block_types=("DownBlock2D",
+                                                "DownBlock2D",
+                                                "DownBlock2D",
+                                                "AttnDownBlock2D",
+                                                "DownBlock2D"),
+                                up_block_types=("UpBlock2D",
+                                                "AttnUpBlock2D",
+                                                "UpBlock2D",
+                                                "UpBlock2D",
+                                                "UpBlock2D"),
+                                block_out_channels=(128, 128, 256, 256, 512),
+                                layers_per_block=2)
+        
+        self.scheduler = getattr(importlib.import_module("diffusers.schedulers"), scheduler_name)(num_train_steps)
+        self.pipeline = DDPMPipeline(self.unet, self.scheduler)
+       
+    
+    # Sampling
+    def reverse_latent_diffusion_process(self, xT = None) -> torch.FloatTensor:
+        pred_x0 = self.pipeline(xT=xT,
+                                num_sampling=self.num_sampling,
+                                num_inference_steps=self.num_inference_steps)
+        
+        return pred_x0
+    
+        
+    def forward_latent_diffusion_process(self, x0, noise = None, t = None) -> torch.FloatTensor:
+        if noise is None:
+            noise = torch.randn(x0.shape, dtype=x0.dtype, device=x0.device)
             
+        if t is None:
+            t = torch.randint(0, self.num_train_steps, (x0.size(0), ), dtype=torch.long, device=x0.device)
+        
+        xT = self.scheduler.add_noise(x0, noise, t)
     
-    def forward(self, batch):
-        x0, _ = batch
-        noise = torch.randn(x0.shape).cuda()
-        timesteps = torch.randint(0, self.n_steps, (x0.size(0), ), device=x0.device, dtype=torch.long)
-        
-        xT = self.scheduler.add_noise(x0, noise, timesteps)
-        
-        x0_hat = xT
-        for t in self.scheduler.timesteps:
-            noisy_x = self.eps_model(x0_hat, t).sample
-            previous_noisy_sample = self.scheduler.step(noisy_x, t, x0_hat).prev_sample
-            x0_hat = previous_noisy_sample
-        
-        return x0_hat
+        return xT
     
     
-    def get_loss(self, batch, epoch):
-        x0, _ = batch
-        noise = torch.randn(x0.shape).cuda()
-        timesteps = torch.randint(0, self.n_steps, (x0.size(0), ), device=x0.device, dtype=torch.long)
+    def forward(self, x0 = None):
+        if x0 is not None:
+            xT = self.forward_latent_diffusion_process(x0)
+        else:
+            xT = None
         
-        xT = self.scheduler.add_noise(x0, noise, timesteps)
-        loss = self.criterion(noise, xT)
+        pred_x0 = self.reverse_latent_diffusion_process(xT)
         
-        return loss.requires_grad_(True)
+        return pred_x0
+    
+    
+    def get_loss(self, x0):
+        t = torch.randint(0, self.num_train_steps, (x0.size(0), ), dtype=torch.long, device=x0.device)
+        noise = torch.randn(x0.shape, dtype=x0.dtype, device=x0.device)
+        
+        xT = self.forward_latent_diffusion_process(x0, noise, t)
+        eps_theta = self.unet(xT, t).sample
+        
+        loss = self.criterion(noise, eps_theta)
+        return loss
 
 
-class DDIM(nn.Module):
+class UnconditionalLDM(nn.Module):
+
     def __init__(self,
-                 eps_model_name:str,
-                 eps_model_args:dict,
-                 image_channel=3,
-                 image_size=32,
-                 F_n_steps=1_000,
-                 R_n_steps=50):
+                 sample_size: Optional[Union[list, tuple, int]] = 32,
+                 in_channels: int = 3,
+                 out_channels: int = 3,
+                 num_train_steps = 1_000,
+                 num_inference_steps = 50,
+                 num_sampling = 1,
+                 eta: float = 0.0):
         super().__init__()
-        self.image_shape = (image_channel, image_size, image_size)
+        ## import LDM library
+        from models.diffusion.pipeline.custom_LDMPipeline import UnconditionalLDMPipeline
+        from diffusers.schedulers.scheduling_ddim import DDIMScheduler
+        from diffusers.models.vq_model import VQModel
+        from diffusers.models.unet_2d import UNet2DModel
+        
         self.criterion = nn.MSELoss()
-        self.F_n_steps = F_n_steps
-        self.R_n_steps = R_n_steps
         
-        eps_model_args.update({"sample_size": image_size, 
-                               "in_channels": image_channel,
-                               "out_channels": image_channel,
-                               "block_out_channels": (128, 128, 256, 256, 512, 512),
-                               "down_block_types": (
-                                    "DownBlock2D",  # a regular ResNet downsampling block
-                                    "DownBlock2D", 
-                                    "DownBlock2D", 
-                                    "DownBlock2D", 
-                                    "AttnDownBlock2D",  # a ResNet downsampling block with spatial self-attention
-                                    "DownBlock2D"),
-                                "up_block_types":(
-                                    "UpBlock2D",  # a regular ResNet upsampling block
-                                    "AttnUpBlock2D",  # a ResNet upsampling block with spatial self-attention
-                                    "UpBlock2D", 
-                                    "UpBlock2D", 
-                                    "UpBlock2D", 
-                                    "UpBlock2D")
-                               })
+        self.sample_size = list_to_tuple(sample_size)
+        self.num_sampling = num_sampling
         
-        self.eps_model = get_obj_from_str(eps_model_name)(**eps_model_args)
-        self.scheduler = DDIMScheduler(F_n_steps, rescale_betas_zero_snr=True, timestep_spacing="trailing")
+        self.num_train_steps = num_train_steps
+        self.num_inference_steps = num_inference_steps
+        self.eta = eta
+        # self.vqvae = VQModel(in_channels=in_channels,
+        #                      out_channels=out_channels,
+        #                      down_block_types=("DownEncoderBlock2D",    #256 -> 128 -> 64 -> 32 / 192 -> 96 -> 48 -> 24
+        #                                        "DownEncoderBlock2D",
+        #                                        "DownEncoderBlock2D",
+        #                                        "DownEncoderBlock2D"),
+        #                      up_block_types=("UpDecoderBlock2D",
+        #                                      "UpDecoderBlock2D",
+        #                                      "UpDecoderBlock2D",
+        #                                      "UpDecoderBlock2D",),
+        #                      block_out_channels=(64, 128, 256, 512),
+        #                      layers_per_block=1,
+        #                      latent_channels=out_channels,
+        #                      sample_size=sample_size[0])
+        self.vqvae = VQModel.from_pretrained("CompVis/stable-diffusion-v1-4", subfolder="vae", ignore_mismatched_sizes=True)
+        self.unet = UNet2DModel(sample_size=(32, 24),
+                                in_channels=out_channels,
+                                out_channels=out_channels,
+                                down_block_types=("DownBlock2D",    # 32 -> 16 -> 8 -> 4 / 24 -> 12 -> 6 -> 3
+                                                "AttnDownBlock2D",
+                                                "DownBlock2D"),
+                                up_block_types=("UpBlock2D",
+                                                "AttnUpBlock2D",
+                                                "UpBlock2D"),
+                                block_out_channels=(128, 256, 512),
+                                layers_per_block=2)
+        
+        self.scheduler = DDIMScheduler(self.num_train_steps)
+        self.pipeline = UnconditionalLDMPipeline(vqvae=self.vqvae,
+                                                 unet=self.unet,
+                                                 scheduler=self.scheduler)
         
     
-    def forward(self, batch):
-        x0, _ = batch
-        noise = torch.randn(x0.shape).cuda()
-        timesteps = torch.randint(0, self.F_n_steps, (x0.size(0), ), device=x0.device, dtype=torch.long)
-        
-        self.scheduler.set_timesteps(self.F_n_steps)
-        xT = self.scheduler.add_noise(x0, noise, timesteps)
-        
-        self.scheduler.set_timesteps(self.R_n_steps)
-        x0_hat = xT
-        for t in self.scheduler.timesteps:
-            noisy_x = self.eps_model(x0_hat, t).sample
-            previous_noisy_sample = self.scheduler.step(noisy_x, t, x0_hat).prev_sample
-            x0_hat = previous_noisy_sample
-        
-        return x0_hat
+    def encode(self, x0):
+        return self.vqvae.encode(x0).latents
     
     
-    def get_loss(self, batch, epoch):
-        x0, _ = batch
-        noise = torch.randn(x0.shape).cuda()
-        timesteps = torch.randint(0, self.F_n_steps, (x0.size(0), ), device=x0.device, dtype=torch.long)
-        
-        self.scheduler.set_timesteps(self.F_n_steps)
-        xT = self.scheduler.add_noise(x0, noise, timesteps)
-        
-        loss = self.criterion(noise, xT)
-        
-        return loss.requires_grad_(True)
+    def decode(self, z0):
+        return self.vqvae.decode(z0).sample
     
+    
+    # Sampling
+    def reverse_latent_diffusion_process(self, latents = None) -> torch.FloatTensor:
+        pred_z0 = self.pipeline(latents=latents,
+                                num_sampling=self.num_sampling,
+                                num_inference_steps=self.num_inference_steps)
+        
+        return pred_z0
+    
+        
+    def forward_latent_diffusion_process(self, x0, noise = None, t = None) -> torch.FloatTensor:
+        if noise is None:
+            noise = torch.randn(x0.shape, dtype=x0.dtype, device=x0.device)
+            
+        if t is None:
+            t = torch.randint(0, self.num_train_steps, (x0.size(0), ), dtype=torch.long, device=x0.device)
+        
+        xT = self.scheduler.add_noise(x0, noise, t)
+    
+        return xT
+    
+    
+    def forward(self, x0 = None):
+        if x0 is not None:
+            z = self.encode(x0)
+            zT = self.forward_latent_diffusion_process(z)
+        else:
+            zT = None
+        
+        pred_z0 = self.reverse_latent_diffusion_process(zT)
+        pred_x0 = self.decode(pred_z0)
+        
+        return pred_x0
+    
+    
+    def get_loss(self, x0):
+        z = self.encode(x0)
+        t = torch.randint(0, self.num_train_steps, (x0.size(0), ), dtype=torch.long, device=x0.device)
+        noise = torch.randn(z.shape, dtype=x0.dtype, device=x0.device)
+        
+        zT = self.forward_latent_diffusion_process(z, noise, t)
+        print(zT.shape)
+        eps_theta = self.unet(zT, t).sample
+        print(eps_theta.shape)
+        exit()
+        loss = self.criterion(noise, eps_theta)
+        return loss
 
+
+class LDM(nn.Module):
+
+    def __init__(self,
+                 sample_size: Optional[Union[list, tuple, int]] = 32,
+                 in_channels: int = 3,
+                 out_channels: int = 3,
+                 num_train_steps = 1_000,
+                 num_inference_steps = 50,
+                 num_sampling = 1,
+                 eta: float = 0.0):
+        super().__init__()
+        ## import LDM library
+        from diffusers import StableDiffusionImg2ImgPipeline
+        
+        self.criterion = nn.MSELoss()
+        self.scheduler = None
+        self.vae = None
+        self.pipeline = StableDiffusionImg2ImgPipeline.from_pretrained("runwayml/stable-diffusion-v1-5", torch_dtype=torch.float16)
+        
+    
+    def encode(self, x0):
+        return self.vae.encode(x0).latents
+    
+    
+    def decode(self, z0):
+        return self.vae.decode(z0).sample
+    
+    
+    # Sampling
+    def reverse_latent_diffusion_process(self, latents = None) -> torch.FloatTensor:
+        pred_z0 = self.pipeline(latents=latents,
+                                num_sampling=self.num_sampling,
+                                num_inference_steps=self.num_inference_steps)
+        
+        return pred_z0
+    
+        
+    def forward_latent_diffusion_process(self, x0, noise = None, t = None) -> torch.FloatTensor:
+        if noise is None:
+            noise = torch.randn(x0.shape, dtype=x0.dtype, device=x0.device)
+            
+        if t is None:
+            t = torch.randint(0, self.num_train_steps, (x0.size(0), ), dtype=torch.long, device=x0.device)
+        
+        xT = self.scheduler.add_noise(x0, noise, t)
+    
+        return xT
+    
+    
+    def forward(self, x0 = None):
+        pass
+    
+    
+    def get_loss(self, x0):
+        pipe = self.pipeline.cuda()
+        
+        from torchvision import transforms
+        
+        x0 = transforms.Resize((256, 256))(x0)
+        print(x0.shape)
+        exit()
+ 
+
+class DDIM_on_StableDiffusion(nn.Module):
+
+    def __init__(self,
+                 sample_size: Optional[Union[list, tuple, int]] = 32,
+                 in_channels: int = 3,
+                 out_channels: int = 3,
+                 num_train_steps = 1_000,
+                 num_inference_steps = 50,
+                 num_sampling = 1,
+                 eta: float = 0.0):
+        super().__init__()
+        ## import LDM library
+        from models.diffusion.pipeline.custom_StableDiffusionPipeline import StableDiffusionPipeline
+        from diffusers.schedulers.scheduling_ddim import DDIMScheduler
+        from diffusers.models.vq_model import VQModel
+        from diffusers.models.unet_2d import UNet2DModel
+        from diffusers.pipelines.stable_diffusion.safety_checker import StableDiffusionSafetyChecker
+        
+        from transformers import CLIPImageProcessor, CLIPTextModel, CLIPTokenizer
+        
+        self.criterion = nn.MSELoss()
+        
+        self.sample_size = list_to_tuple(sample_size)
+        self.num_sampling = num_sampling
+        
+        self.num_train_steps = num_train_steps
+        self.num_inference_steps = num_inference_steps
+        self.eta = eta
+        self.vae = VQModel.from_pretrained("CompVis/stable-diffusion-v1-4", subfolder="vae", ignore_mismatched_sizes=True)
+        self.text_encoder = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14")
+        self.tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
+        self.unet = UNet2DModel(sample_size=(32, 24),
+                                in_channels=out_channels,
+                                out_channels=out_channels,
+                                down_block_types=("DownBlock2D",    # 32 -> 16 -> 8 -> 4 / 24 -> 12 -> 6 -> 3
+                                                "AttnDownBlock2D",
+                                                "DownBlock2D"),
+                                up_block_types=("UpBlock2D",
+                                                "AttnUpBlock2D",
+                                                "UpBlock2D"),
+                                block_out_channels=(128, 256, 512),
+                                layers_per_block=2)
+        self.scheduler = DDIMScheduler(self.num_train_steps)
+        self.safety_checker = StableDiffusionSafetyChecker.from_pretrained("CompVis/stable-diffusion-v1-4")
+        self.feature_extractor = CLIPImageProcessor.from_pretrained("openai/clip-vit-large-patch14")
+        self.pipeline = StableDiffusionPipeline(vae=self.vae,
+                                                text_encoder=self.text_encoder,
+                                                tokenizer=self.tokenizer,
+                                                unet=self.unet,
+                                                scheduler=self.scheduler,
+                                                safety_checker=self.safety_checker,
+                                                feature_extractor=self.feature_extractor,
+                                                requires_safety_checker=False
+                                                )
+        
+    
+    def encode(self, x0):
+        return self.vqvae.encode(x0).latents
+    
+    
+    def decode(self, z0):
+        return self.vqvae.decode(z0).sample
+    
+    
+    # Sampling
+    def reverse_latent_diffusion_process(self, latents = None) -> torch.FloatTensor:
+        pred_z0 = self.pipeline(latents=latents,
+                                num_sampling=self.num_sampling,
+                                num_inference_steps=self.num_inference_steps)
+        
+        return pred_z0
+    
+        
+    def forward_latent_diffusion_process(self, x0, noise = None, t = None) -> torch.FloatTensor:
+        if noise is None:
+            noise = torch.randn(x0.shape, dtype=x0.dtype, device=x0.device)
+            
+        if t is None:
+            t = torch.randint(0, self.num_train_steps, (x0.size(0), ), dtype=torch.long, device=x0.device)
+        
+        xT = self.scheduler.add_noise(x0, noise, t)
+    
+        return xT
+    
+    
+    def forward(self, x0 = None):
+        if x0 is not None:
+            z = self.encode(x0)
+            zT = self.forward_latent_diffusion_process(z)
+        else:
+            zT = None
+        
+        pred_z0 = self.reverse_latent_diffusion_process(zT)
+        pred_x0 = self.decode(pred_z0)
+        
+        return pred_x0
+    
+    
+    def get_loss(self, x0):
+        z = self.encode(x0)
+        t = torch.randint(0, self.num_train_steps, (x0.size(0), ), dtype=torch.long, device=x0.device)
+        noise = torch.randn(z.shape, dtype=x0.dtype, device=x0.device)
+        
+        zT = self.forward_latent_diffusion_process(z, noise, t)
+        print(zT.shape)
+        eps_theta = self.unet(zT, t).sample
+        print(eps_theta.shape)
+        exit()
+        loss = self.criterion(noise, eps_theta)
+        return loss
+    
+    
 class LitDiffusers(pl.LightningModule):
     def __init__(self,
                  lr: float,
-                 lr_warmup_steps: int,
+                 img2img: bool,
+                 sampling_step: int,
                  optim_name: str,
                  model_name: str,
                  model_args: tuple) -> None:
         super().__init__()
         self.lr = lr
-        self.lr_warmup_steps = lr_warmup_steps
+        self.img2img = img2img
+        self.sampling_step = sampling_step
         self.optimizer = getattr(importlib.import_module("torch.optim"), optim_name)
         self.model = getattr(importlib.import_module(__name__), model_name)(**model_args)
         
-        
-    def get_grid(self, tensor, image_shape):
+    def get_grid(self, tensor, image_shape = None):
         
         if len(tensor.shape) == 2:
             tensor = tensor.view(tensor.size(0), image_shape[0], image_shape[1], image_shape[2])
@@ -175,52 +415,55 @@ class LitDiffusers(pl.LightningModule):
     
     
     def configure_optimizers(self):
-        optim = self.optimizer(self.model.eps_model.parameters(), self.lr)
+        optim = self.optimizer(self.model.parameters(), self.lr)
         
-        scheduler = get_cosine_schedule_with_warmup(
-            optimizer=optim,
-            num_warmup_steps=self.lr_warmup_steps,
-            num_training_steps=(40000 * self.trainer.max_epochs)
-        )
-        return {"optimizer":optim, 
-                "lr_scheduler":scheduler}
+        return {"optimizer": optim}
     
-        # return optim
     
+    def sampling(self, x0):
+        with torch.no_grad():
+            if self.img2img:
+                x0 = x0[:self.model.num_sampling]
+                self.logger.experiment.add_image("x0", self.get_grid(x0), self.current_epoch)
+                
+            else:
+                x0 = None
+                
+            pred_x0 = self.model(x0)
+            
+            self.logger.experiment.add_image("pred_x0", self.get_grid(pred_x0), self.current_epoch)
+        
+        
     def training_step(self, batch, batch_idx):
-        # self.model.set_variable_device(self.device)
-        loss = self.model.get_loss(batch, self.current_epoch)
+        x0, _ = batch
+        
+        loss = self.model.get_loss(x0)
         self.log("train_loss", loss, prog_bar=True, sync_dist=True)
+        
+        if self.trainer.is_last_batch:
+            if self.current_epoch == 0:
+                self.sampling(x0)
+            elif (self.current_epoch + 1) % self.sampling_step == 0:
+                self.sampling(x0)
+                    
         return loss
     
     
-    def on_train_batch_end(self, outputs, batch: Any, batch_idx: int):
-        self.logger.experiment.add_image("x0_hat", self.get_grid(self.model(batch), self.model.image_shape), self.current_epoch)
-    
-    
     def validation_step(self, batch, batch_idx):
-        # self.model.set_variable_device(self.device)
-        loss = self.model.get_loss(batch, self.current_epoch)
+        x0, _ = batch
+        loss = self.model.get_loss(x0)
         self.log("val_loss", loss, prog_bar=True, sync_dist=True)
         return loss
     
     
     def test_step(self, batch, batch_idx):
-        # self.model.set_variable_device(self.device)
-        loss = self.model.get_loss(batch, self.current_epoch)
+        x0, _ = batch
+        loss = self.model.get_loss(x0)
         self.log("test_loss", loss, prog_bar=True, sync_dist=True)
         return loss
     
     
     def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> Any:
-        x0_hat = self.model(batch)
-        return x0_hat
+        x0, _ = batch
+        self.sampling(x0)
     
-    
-    def on_predict_batch_end(self, outputs, batch, batch_idx, dataloader_idx=0):
-        out_path = os.path.join(self.trainer.log_dir, "output_predict")
-        os.makedirs(out_path, exist_ok=True)
-        
-        x_hat_grid = self.get_grid(outputs, outputs.shape)
-        x_hat_PIL = transforms.ToPILImage()(x_hat_grid)
-        x_hat_PIL.save(os.path.join(out_path, f"{batch_idx}.png"))
