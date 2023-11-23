@@ -3,6 +3,7 @@ from omegaconf import OmegaConf
 
 import lightning.pytorch as pl
 from lightning.pytorch.callbacks.early_stopping import EarlyStopping
+from lightning.pytorch.callbacks import LearningRateMonitor
 from lightning.pytorch.loggers.tensorboard import TensorBoardLogger
 
 import torch
@@ -35,7 +36,7 @@ def check_opt(opt):
 
 
 def get_config(opt):
-    if config is None:
+    if opt.config is None:
         config = OmegaConf.load(os.path.join("configs", opt.model_type, f"{opt.model_name}.yaml"))
     else:
         config = OmegaConf.load(opt.config)
@@ -109,7 +110,8 @@ if __name__ == "__main__":
     tensorboard_logger = TensorBoardLogger(logger_config.logger_path)
     
     trainer = pl.Trainer(logger=tensorboard_logger,
-                         callbacks=[EarlyStopping(**lightning_config.trainer.callbacks_params)],
+                         callbacks=[EarlyStopping(**lightning_config.trainer.earlystop_params),
+                                    LearningRateMonitor(**lightning_config.trainer.monitor_params)],
                          **lightning_config.trainer,
                          )
     

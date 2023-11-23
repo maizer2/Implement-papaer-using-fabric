@@ -2,9 +2,10 @@ import importlib, os
 from typing import Any, Optional, Union
 
 import lightning.pytorch as pl
-import 
+
 import torch
 import torch.nn as nn
+from torch.optim.lr_scheduler import LambdaLR
 
 from torchvision.utils import make_grid
 from torchvision import transforms
@@ -226,7 +227,12 @@ class Lit_diffusion(pl.LightningModule):
     def configure_optimizers(self):
         optim = self.optimizer(self.model.unet.parameters(), self.lr)
         
-        return optim
+        lambda1 = lambda epoch: epoch // 30
+        lambda2 = lambda epoch: 0.95 ** epoch
+        scheduler = LambdaLR(self.optimizer,
+                             lr_lambda=[lambda1, lambda2])
+        
+        return [optim], [scheduler]
     
     def training_step(self, batch, batch_idx):
         loss = self.model.get_loss(batch, self.current_epoch)
