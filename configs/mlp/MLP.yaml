@@ -1,5 +1,5 @@
 model:
-  target: models.mlp.MLP.LitMLP
+  target: models.mlp.MLP.Lit_mlp
   params:
     optim_name: Adam
     lr: 1e-3

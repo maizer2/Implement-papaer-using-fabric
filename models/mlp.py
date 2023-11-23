@@ -71,7 +71,7 @@ class MultiLayerPerceptron(nn.Module):
         return loss
  
  
-class LitMLP(pl.LightningModule):
+class Lit_mlp(pl.LightningModule):
     def __init__(self, 
                  lr,
                  optim_name,

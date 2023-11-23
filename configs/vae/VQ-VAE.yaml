@@ -1,5 +1,5 @@
 model:
-  target: models.vae.VAE.LitVAE
+  target: models.vae.VAE.Lit_vae
   params:
     lr: 1e-4
     sampling_step: 10

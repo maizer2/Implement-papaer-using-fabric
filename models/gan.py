@@ -9,7 +9,7 @@ import torch.optim as toptim
 from torchvision.utils import make_grid
 from torchvision import transforms
 
-from models.cnn.CNN import BasicConvNet, DeConvolution_layer, Convolution_layer
+from models.ae.CNN import BasicConvNet, DeConvolution_layer, Convolution_layer
 from models.mlp.MLP import MultiLayerPerceptron
 
 conv_configure= namedtuple("conv_config", ["model", 
@@ -450,7 +450,7 @@ class Pix2Pix(nn.Module):
     pass
     
     
-class LitGAN(pl.LightningModule):
+class Lit_gan(pl.LightningModule):
     def __init__(self,
                  lr,
                  optim_name: str,

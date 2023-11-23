@@ -1,21 +1,18 @@
 import importlib, os
-from collections import namedtuple
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import lightning.pytorch as pl
-from lightning.pytorch.utilities.types import STEP_OUTPUT
+import 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import torch.optim as toptim
+
 from torchvision.utils import make_grid
 from torchvision import transforms
 
-from models.cnn.CNN import BasicConvNet, DeConvolution_layer, Convolution_layer
-from models.mlp.MLP import MultiLayerPerceptron
-from run import get_obj_from_str
+from run import get_obj_from_str, instantiate_from_config
 
-    
+from diffusers import DDPMScheduler, UNet2DModel, DDPMPipeline
+
 class DDPM(nn.Module):
     def __init__(self,
                  eps_model_name:str,
@@ -110,6 +107,79 @@ class DDPM(nn.Module):
         return loss
 
 
+class diffusers_DDPM(nn.Module):
+    def __init__(self,
+                 unet_config: str,
+                 scheduler_config: str,
+                 num_inference_steps = 1_000):
+        super().__init__()
+        self.criterion = nn.MSELoss()
+        
+        self.num_inference_steps = num_inference_steps
+        
+        self.unet = instantiate_from_config(unet_config)
+        self.scheduler = instantiate_from_config(scheduler_config)
+
+        
+    def forward_diffusion_process(self, x0, noise = None, t = None) -> torch.FloatTensor:
+        if noise is None:
+            noise = torch.randn(x0.shape, dtype=x0.dtype, device=x0.device)
+        
+        if t is None:
+            t = torch.full((x0.size(0), ), self.scheduler.timesteps[0], dtype=x0.dtype, device=x0.device)
+            
+        xT = self.scheduler.add_noise(x0, noise, t)
+    
+        return xT
+    
+    
+    def reverse_diffusion_process(self, x0 = None, shape = None) -> torch.FloatTensor:
+        if x0 is None:
+            xT = torch.randn(shape, dtype=torch.float32).cuda()
+        else:
+            xT = self.forward_diffusion_process(x0)
+        
+        pred_x0 = xT
+        self.scheduler.set_timesteps(self.num_inference_steps, xT.device)
+        for t in self.scheduler.timesteps:
+            
+            # 1. predict noise model_output
+            model_output = self.unet(pred_x0, t).sample
+
+            # 2. compute previous image: x_t -> x_t-1
+            pred_x0 = self.scheduler.step(model_output, t, pred_x0).prev_sample
+        
+        return pred_x0
+    
+    
+    def forward(self, x0, noise):
+        t = torch.randint(0, self.num_train_steps, (x0.size(0), ), dtype=torch.long, device=x0.device)
+        xT = self.forward_diffusion_process(x0, noise, t)
+        
+        rec_sample = self.unet(xT, t).sample
+        
+        return rec_sample
+    
+    
+    def get_loss(self, x0):
+        noise = torch.randn(x0.shape, dtype=x0.dtype, device=x0.device)
+        rec_sample = self(x0, noise)
+        
+        loss = self.criterion(noise, rec_sample)
+        return loss
+
+
+    def inference(self, x0 = None, shape = None):
+        if x0 is not None:
+            xT = self.forward_diffusion_process(x0)
+        else:
+            xT = None
+        
+        pred_x0 = self.reverse_diffusion_process(xT, shape)
+        
+        return pred_x0
+    
+
 class DDIM(nn.Module):
     def __init__(self,
                  eps_model_name:str,
@@ -136,58 +206,43 @@ class DDIM(nn.Module):
         pass
     
 
-class LitDiffusion(pl.LightningModule):
+class Lit_diffusion(pl.LightningModule):
     def __init__(self,
                  lr: float,
+                 sampling_step: int,
+                 num_sampling: int,
+                 img2img: bool,
                  optim_name: str,
                  model_name: str,
                  model_args: tuple) -> None:
         super().__init__()
         self.lr = lr
+        self.sampling_step = sampling_step
+        self.num_sampling = num_sampling
+        self.img2img = img2img
         self.optimizer = getattr(importlib.import_module("torch.optim"), optim_name)
         self.model = getattr(importlib.import_module(__name__), model_name)(**model_args)
         
-        
-    def get_grid(self, tensor, image_shape):
-        
-        if len(tensor.shape) == 2:
-            tensor = tensor.view(tensor.size(0), image_shape[0], image_shape[1], image_shape[2])
-        
-        return make_grid(tensor, normalize=True)
-    
-    
     def configure_optimizers(self):
-        optim = self.optimizer(self.model.eps_model.parameters(), self.lr)
+        optim = self.optimizer(self.model.unet.parameters(), self.lr)
+        
         return optim
     
-    
     def training_step(self, batch, batch_idx):
-        # self.model.set_variable_device(self.device)
         loss = self.model.get_loss(batch, self.current_epoch)
-        self.log("train_loss", loss, prog_bar=True, sync_dist=True)
-        return loss
-    
-    
-    def on_train_batch_end(self, outputs, batch: Any, batch_idx: int):
-        z = torch.randn([self.model.n_samples, self.model.image_shape[0], self.model.image_shape[1], self.model.image_shape[2]],
-                        device=self.device)
+        self.logging_loss(loss, "train")
         
-        self.logger.experiment.add_image("x_hat", self.get_grid(self.model(z), self.model.image_shape), self.current_epoch)
-    
+        return loss
     
     def validation_step(self, batch, batch_idx):
         # self.model.set_variable_device(self.device)
         loss = self.model.get_loss(batch, self.current_epoch)
-        self.log("val_loss", loss, prog_bar=True, sync_dist=True)
-        return loss
-    
+        self.logging_loss(loss, "val")
     
     def test_step(self, batch, batch_idx):
         # self.model.set_variable_device(self.device)
         loss = self.model.get_loss(batch, self.current_epoch)
-        self.log("test_loss", loss, prog_bar=True, sync_dist=True)
-        return loss
-    
+        self.logging_loss(loss, "test")
     
     def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> Any:
         z = torch.randn([self.model.n_samples, self.model.image_shape[0], self.model.image_shape[1], self.model.image_shape[2]],
@@ -196,7 +251,6 @@ class LitDiffusion(pl.LightningModule):
         x_hat = self.model(z)
         return x_hat
     
-    
     def on_predict_batch_end(self, outputs, batch, batch_idx, dataloader_idx=0):
         out_path = os.path.join(self.trainer.log_dir, "output_predict")
         os.makedirs(out_path, exist_ok=True)
@@ -204,3 +258,41 @@ class LitDiffusion(pl.LightningModule):
         x_hat_grid = self.get_grid(outputs, outputs.shape)
         x_hat_PIL = transforms.ToPILImage()(x_hat_grid)
         x_hat_PIL.save(os.path.join(out_path, f"{batch_idx}.png"))
+        
+    def logging_loss(self, loss, prefix):
+        self.log(f'{prefix}/loss', loss, prog_bar=True, sync_dist=True)
+        
+    def get_grid(self, inputs, return_pil=False):        
+        if not isinstance(inputs, list):
+            inputs = [inputs]
+        
+        outputs = []
+        for data in inputs:
+            data = (data / 2 + 0.5).clamp(0, 1)
+            
+            if return_pil:
+                outputs.append(self.numpy_to_pil(make_grid(data)))
+            else:
+                outputs.append(make_grid(data))
+        
+        return outputs
+    
+    def sampling(self, batch, prefix="train"):
+        x0 = batch[0][:self.num_sampling]
+        
+        if self.img2img:
+            pred_x0 = self.model.inference(x0)
+        else:
+            pred_x0 = self.model.inference(shape=x0.shape)
+        
+        x0_grid, pred_grid = self.get_grid([x0, pred_x0])
+        
+        self.logger.experiment.add_image(f'{prefix}/x0', x0_grid, self.current_epoch)
+        self.logger.experiment.add_image(f'{prefix}/pred_x0', pred_grid, self.current_epoch)
+        
+    def logging_output(self, batch, prefix="train"):
+        if self.trainer.is_last_batch:
+            if self.current_epoch == 0:
+                self.sampling(batch, prefix)
+            elif (self.current_epoch + 1) % self.sampling_step == 0:
+                self.sampling(batch, prefix)

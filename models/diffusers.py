@@ -39,10 +39,11 @@ class DDPM(nn.Module):
         self.num_inference_steps = num_inference_steps
         self.eta = eta
         
-        self.unet = UNet2DModel(sample_size=sample_size,
+        self.unet = UNet2DModel(sample_size=list_to_tuple(sample_size),
                                 in_channels=in_channels,
                                 out_channels=out_channels,
                                 down_block_types=("DownBlock2D",
+                                                "DownBlock2D",
                                                 "DownBlock2D",
                                                 "DownBlock2D",
                                                 "AttnDownBlock2D",
@@ -51,8 +52,9 @@ class DDPM(nn.Module):
                                                 "AttnUpBlock2D",
                                                 "UpBlock2D",
                                                 "UpBlock2D",
+                                                "UpBlock2D",
                                                 "UpBlock2D"),
-                                block_out_channels=(128, 128, 256, 256, 512),
+                                block_out_channels=(128, 128, 256, 256, 512, 512),
                                 layers_per_block=2)
         
         self.scheduler = getattr(importlib.import_module("diffusers.schedulers"), scheduler_name)(num_train_steps)
@@ -391,7 +393,7 @@ class DDIM_on_StableDiffusion(nn.Module):
         return loss
     
     
-class LitDiffusers(pl.LightningModule):
+class Lit_diffusers(pl.LightningModule):
     def __init__(self,
                  lr: float,
                  img2img: bool,
@@ -419,32 +421,64 @@ class LitDiffusers(pl.LightningModule):
         
         return {"optimizer": optim}
     
+        
+        
+    def get_input(self, batch) -> torch.Tensor:
+        image, cm = batch['image'], batch['cloth_mask']
+        x0 = torch.cat([image, cm], 1)
+        
+        return x0
+        
     
-    def sampling(self, x0):
-        with torch.no_grad():
-            if self.img2img:
-                x0 = x0[:self.model.num_sampling]
-                self.logger.experiment.add_image("x0", self.get_grid(x0), self.current_epoch)
+    def get_condition(self, batch) -> list:
+        condition = [batch["shape"], batch["head"], batch["pose_image"], batch["cloth"]]
+        
+        return condition
+        
+    
+    def get_tryon(self, cloth, p_rendered, m_composite):
+        p_tryon = cloth * m_composite + p_rendered * (1 - m_composite)
+        
+        return p_tryon
+    
+    
+    def sampling(self, batch):
+        # with torch.no_grad():
+        #     if self.img2img:
+        #         x0 = x0[:self.model.num_sampling]
+        #         self.logger.experiment.add_image("x0", self.get_grid(x0), self.current_epoch)
                 
-            else:
-                x0 = None
+        #     else:
+        #         x0 = None
                 
-            pred_x0 = self.model(x0)
+        #     pred_x0 = self.model(x0)
             
-            self.logger.experiment.add_image("pred_x0", self.get_grid(pred_x0), self.current_epoch)
+        #     self.logger.experiment.add_image("pred_x0", self.get_grid(pred_x0), self.current_epoch)
         
-        
+        with torch.no_grad():
+            outputs = self.model(self.get_input(batch))
+
+            p_rendered, m_composite = torch.split(outputs, 3, 1)
+            tryon = self.get_tryon(batch["cloth"], p_rendered, m_composite)
+                
+            self.logger.experiment.add_image("Original", self.get_grid(batch["image"]), self.current_epoch)
+            self.logger.experiment.add_image("Rendered", self.get_grid(p_rendered), self.current_epoch)
+            self.logger.experiment.add_image("Cloth_mask", self.get_grid(batch["cloth_mask"]), self.current_epoch)
+            self.logger.experiment.add_image("Composite", self.get_grid(m_composite), self.current_epoch)
+            self.logger.experiment.add_image("Tryon", self.get_grid(tryon), self.current_epoch)
+    
+    
     def training_step(self, batch, batch_idx):
-        x0, _ = batch
+        x0 = self.get_input(batch)
         
         loss = self.model.get_loss(x0)
         self.log("train_loss", loss, prog_bar=True, sync_dist=True)
         
         if self.trainer.is_last_batch:
             if self.current_epoch == 0:
-                self.sampling(x0)
+                self.sampling(batch)
             elif (self.current_epoch + 1) % self.sampling_step == 0:
-                self.sampling(x0)
+                self.sampling(batch)
                     
         return loss
     

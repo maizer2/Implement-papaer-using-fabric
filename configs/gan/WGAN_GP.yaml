@@ -1,5 +1,5 @@
 model:
-  target: models.gan.GAN.LitGAN
+  target: models.gan.GAN.Lit_gan
   params:
     optim_name: RMSprop
     lr: 0.00005

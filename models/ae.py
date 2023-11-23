@@ -438,7 +438,7 @@ class Unet_diff(nn.Module):
         return loss
     
     
-class LitAE(pl.LightningModule):
+class Lit_ae(pl.LightningModule):
     def __init__(self,
                  optim_name: str,
                  lr,

@@ -85,7 +85,7 @@ class VQ_VAE(nn.Module):
         return loss
         
     
-class LitVAE(pl.LightningModule):
+class Lit_vae(pl.LightningModule):
     def __init__(self,
                  lr,
                  sampling_step,

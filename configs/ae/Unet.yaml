@@ -1,5 +1,5 @@
 model:
-  target: models.ae.AE.LitAE
+  target: models.ae.AE.Lit_ae
   params:
     optim_name: Adam
     lr: 0.0002

@@ -1,0 +1,57 @@
+model:
+  target: models.diffusion.Lit_diffusion
+  params:
+    lr: 1e-4
+    sampling_step: 5
+    num_sampling: 20
+    img2img: False
+    optim_name: Adam
+    model_args:
+      unet_config:
+        target: diffusers.Unet2DModel
+        params:
+          num_inference_steps: 1000
+          in_channels: 3
+          out_channels: 3
+          down_block_types:
+          - DownBlock2D
+          - AttnDownBlock2D
+          - AttnDownBlock2D
+          - AttnDownBlock2D
+          up_block_types:
+          - AttnUpBlock2D
+          - AttnUpBlock2D
+          - AttnUpBlock2D
+          - UpBlock2D
+          block_out_channels:
+          - 128
+          - 128
+          - 256
+          - 512
+      scheduler_config:
+        target: diffusers.DDPMScheduler
+        params:
+          num_train_steps: 1000
+
+      
+logger:
+  logger_path: checkpoints
+    
+lightning:
+  trainer:
+    strategy: ddp_find_unused_parameters_True
+    precision: 16-mixed
+    max_epochs: 100
+    sync_batchnorm: True
+    devices: [0]
+    callbacks_params:
+      monitor: val/loss
+      mode: min
+
+dataset:
+  name: CIFAR10
+  data_path: data
+  height: 32
+  width: 32
+  num_workers: 6
+  batch_size: 64
