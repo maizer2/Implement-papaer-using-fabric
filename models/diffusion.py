@@ -5,6 +5,7 @@ import lightning.pytorch as pl
 
 import torch
 import torch.nn as nn
+from torch.optim import Adam
 from torch.optim.lr_scheduler import LambdaLR
 
 from torchvision.utils import make_grid
@@ -127,18 +128,16 @@ class diffusers_DDPM(nn.Module):
             noise = torch.randn(x0.shape, dtype=x0.dtype, device=x0.device)
         
         if t is None:
-            t = torch.full((x0.size(0), ), self.scheduler.timesteps[0], dtype=x0.dtype, device=x0.device)
+            t = torch.full((x0.size(0), ), self.scheduler.timesteps[0], dtype=torch.int64, device=x0.device)
             
         xT = self.scheduler.add_noise(x0, noise, t)
     
         return xT
     
     
-    def reverse_diffusion_process(self, x0 = None, shape = None) -> torch.FloatTensor:
-        if x0 is None:
+    def reverse_diffusion_process(self, xT = None, shape = None) -> torch.FloatTensor:
+        if xT is None:
             xT = torch.randn(shape, dtype=torch.float32).cuda()
-        else:
-            xT = self.forward_diffusion_process(x0)
         
         pred_x0 = xT
         self.scheduler.set_timesteps(self.num_inference_steps, xT.device)
@@ -149,12 +148,13 @@ class diffusers_DDPM(nn.Module):
 
             # 2. compute previous image: x_t -> x_t-1
             pred_x0 = self.scheduler.step(model_output, t, pred_x0).prev_sample
+            del model_output
         
         return pred_x0
     
     
     def forward(self, x0, noise):
-        t = torch.randint(0, self.num_train_steps, (x0.size(0), ), dtype=torch.long, device=x0.device)
+        t = torch.randint(0, len(self.scheduler.timesteps), (x0.size(0), ), dtype=torch.long, device=x0.device)
         xT = self.forward_diffusion_process(x0, noise, t)
         
         rec_sample = self.unet(xT, t).sample
@@ -167,16 +167,22 @@ class diffusers_DDPM(nn.Module):
         rec_sample = self(x0, noise)
         
         loss = self.criterion(noise, rec_sample)
+        
         return loss
 
 
     def inference(self, x0 = None, shape = None):
-        if x0 is not None:
-            xT = self.forward_diffusion_process(x0)
-        else:
-            xT = None
+        self.unet.eval()
         
-        pred_x0 = self.reverse_diffusion_process(xT, shape)
+        with torch.no_grad():
+            if x0 is not None:
+                xT = self.forward_diffusion_process(x0)
+            else:
+                xT = None
+            
+            pred_x0 = self.reverse_diffusion_process(xT, shape)
+        
+        self.unet.train()
         
         return pred_x0
     
@@ -212,10 +218,10 @@ class Lit_diffusion(pl.LightningModule):
                  lr: float,
                  sampling_step: int,
                  num_sampling: int,
-                 img2img: bool,
                  optim_name: str,
                  model_name: str,
-                 model_args: tuple) -> None:
+                 model_args: tuple,
+                 img2img: bool = True) -> None:
         super().__init__()
         self.lr = lr
         self.sampling_step = sampling_step
@@ -229,41 +235,50 @@ class Lit_diffusion(pl.LightningModule):
         
         lambda1 = lambda epoch: epoch // 30
         lambda2 = lambda epoch: 0.95 ** epoch
-        scheduler = LambdaLR(self.optimizer,
-                             lr_lambda=[lambda1, lambda2])
         
-        return [optim], [scheduler]
+        # scheduler = LambdaLR(optim, lr_lambda=[lambda1, lambda2])
+        scheduler = LambdaLR(optim, lr_lambda=lambda2)
+        
+        # return [optim], [scheduler]
+        return optim
     
     def training_step(self, batch, batch_idx):
-        loss = self.model.get_loss(batch, self.current_epoch)
+        x0 = batch[0]
+        loss = self.model.get_loss(x0)
+        
         self.logging_loss(loss, "train")
+        self.logging_output(batch, "train")
         
         return loss
     
     def validation_step(self, batch, batch_idx):
-        # self.model.set_variable_device(self.device)
-        loss = self.model.get_loss(batch, self.current_epoch)
+        x0 = batch[0]
+        loss = self.model.get_loss(x0)
+        
         self.logging_loss(loss, "val")
     
     def test_step(self, batch, batch_idx):
-        # self.model.set_variable_device(self.device)
-        loss = self.model.get_loss(batch, self.current_epoch)
+        x0 = batch[0]
+        loss = self.model.get_loss(x0)
+        
         self.logging_loss(loss, "test")
     
     def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> Any:
-        z = torch.randn([self.model.n_samples, self.model.image_shape[0], self.model.image_shape[1], self.model.image_shape[2]],
-                        device=self.device)
-        
-        x_hat = self.model(z)
-        return x_hat
+        x0 = batch[0]
+        x0_hat = self.predict(x0)
     
     def on_predict_batch_end(self, outputs, batch, batch_idx, dataloader_idx=0):
-        out_path = os.path.join(self.trainer.log_dir, "output_predict")
-        os.makedirs(out_path, exist_ok=True)
+        pass
         
-        x_hat_grid = self.get_grid(outputs, outputs.shape)
-        x_hat_PIL = transforms.ToPILImage()(x_hat_grid)
-        x_hat_PIL.save(os.path.join(out_path, f"{batch_idx}.png"))
+    def predict(self, x0):
+        shape = x0.shape
+        
+        if not self.img2img:
+            x0 = None
+        
+        x0_hat = self.model.inference(x0, shape)
+        
+        return x0_hat
         
     def logging_loss(self, loss, prefix):
         self.log(f'{prefix}/loss', loss, prog_bar=True, sync_dist=True)
@@ -285,20 +300,18 @@ class Lit_diffusion(pl.LightningModule):
     
     def sampling(self, batch, prefix="train"):
         x0 = batch[0][:self.num_sampling]
+        x0_hat = self.predict(x0)
         
-        if self.img2img:
-            pred_x0 = self.model.inference(x0)
-        else:
-            pred_x0 = self.model.inference(shape=x0.shape)
-        
-        x0_grid, pred_grid = self.get_grid([x0, pred_x0])
+        x0_grid, pred_grid = self.get_grid([x0, x0_hat])
         
         self.logger.experiment.add_image(f'{prefix}/x0', x0_grid, self.current_epoch)
-        self.logger.experiment.add_image(f'{prefix}/pred_x0', pred_grid, self.current_epoch)
-        
+        self.logger.experiment.add_image(f'{prefix}/x0_hat', pred_grid, self.current_epoch)
+                
     def logging_output(self, batch, prefix="train"):
-        if self.trainer.is_last_batch:
-            if self.current_epoch == 0:
-                self.sampling(batch, prefix)
-            elif (self.current_epoch + 1) % self.sampling_step == 0:
-                self.sampling(batch, prefix)
+        if self.global_rank == 0:
+            if self.trainer.is_last_batch:
+                if self.current_epoch == 0:
+                    self.sampling(batch, prefix)
+                elif (self.current_epoch + 1) % self.sampling_step == 0:
+                    self.sampling(batch, prefix)
+                

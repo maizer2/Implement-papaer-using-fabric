@@ -4,7 +4,7 @@ model:
     lr: 1e-4
     sampling_step: 5
     num_sampling: 20
-    img2img: False
+    img2img: True
     optim_name: Adam
     model_args:
       num_inference_steps: 1000
@@ -43,12 +43,12 @@ lightning:
     precision: 16-mixed
     max_epochs: 100000
     sync_batchnorm: True
-    devices: [0]
-    earlystop_params:
-      monitor: val/loss
-      mode: min
-    monitor_params:
-      logging_interval: step
+    # devices: [0]
+  earlystop_params:
+    monitor: val/loss
+    mode: min
+  monitor_params:
+    logging_interval: step
 
 dataset:
   name: CIFAR10
@@ -56,4 +56,4 @@ dataset:
   height: 32
   width: 32
   num_workers: 6
-  batch_size: 64
+  batch_size: 32

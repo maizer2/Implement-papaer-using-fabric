@@ -73,18 +73,22 @@ def get_dataloader(data_config, transform=None):
                                                                                                 transform=transform)
     train_loader = data.DataLoader(train_dataset, 
                                    batch_size=data_config.batch_size, 
-                                   num_workers=data_config.num_workers
+                                   num_workers=data_config.num_workers,
+                                   drop_last=True
                                    )
     
     val_loader = data.DataLoader(val_dataset,
                                  batch_size=data_config.batch_size,
-                                 num_workers=data_config.num_workers
+                                 num_workers=data_config.num_workers,
+                                 drop_last=True
                                  )
     
     test_loader = data.DataLoader(test_dataset, 
-                            batch_size=data_config.batch_size, 
-                            num_workers=data_config.num_workers
-                            )
+                                  batch_size=data_config.batch_size, 
+                                  num_workers=data_config.num_workers,
+                                  drop_last=True
+                                  )
+                            
     
     return train_loader, val_loader, test_loader
     
@@ -107,11 +111,13 @@ if __name__ == "__main__":
     
     model = instantiate_from_config(model_config)
     
-    tensorboard_logger = TensorBoardLogger(logger_config.logger_path)
+    logger = TensorBoardLogger(logger_config.logger_path)
     
-    trainer = pl.Trainer(logger=tensorboard_logger,
-                         callbacks=[EarlyStopping(**lightning_config.trainer.earlystop_params),
-                                    LearningRateMonitor(**lightning_config.trainer.monitor_params)],
+    trainer = pl.Trainer(logger=logger,
+                        #  callbacks=[
+                        #      EarlyStopping(**lightning_config.earlystop_params),
+                        #      LearningRateMonitor(**lightning_config.monitor_params)
+                        #      ],
                          **lightning_config.trainer,
                          )
     
