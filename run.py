@@ -25,7 +25,9 @@ def get_opt():
     parser.add_argument("--model_type", required=True,
                         choices=["ae", "cnn", "diffusion", "gan", "mlp", "vae"])
     parser.add_argument("--model_name", required=True,
-                        choices=["diffusers_DDPM"])
+                        choices=["DDPM", "diffusers_DDPM"])
+    parser.add_argument("--dataset", required=True,
+                        choices=["MNIST", "CIFAL10"])
     
     opt = parser.parse_args()
     return opt
@@ -37,19 +39,20 @@ def check_opt(opt):
 
 def get_config(opt):
     if opt.config is None:
-        config = OmegaConf.load(os.path.join("configs", opt.model_type, f"{opt.model_name}.yaml"))
+        config = OmegaConf.load(os.path.join("configs", opt.model_type, opt.dataset, f"{opt.model_name}.yaml"))
     else:
         config = OmegaConf.load(opt.config)
         
     model_config, logger_config, lightning_config, data_config = config.model, config.logger, config.lightning, config.dataset
     
-    base_logger_path = os.path.join(logger_config.logger_path, opt.model_type, opt.model_name, data_config.name)
+    base_logger_path = os.path.join(logger_config.logger_path, opt.model_type, opt.model_name, opt.dataset)
     
     model_config.params["model_name"] = opt.model_name
     model_config.params.model_args.unet_config["sample_size"] = (data_config.height, data_config.width)
     
     logger_config.logger_path = os.path.join(base_logger_path, str(data_config.height))
     
+    data_config["name"] = opt.dataset
     data_config["data_path"] = os.path.join(data_config.data_path, data_config.name)
     
     return model_config, logger_config, lightning_config, data_config

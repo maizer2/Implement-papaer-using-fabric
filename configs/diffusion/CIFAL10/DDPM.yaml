@@ -1,0 +1,54 @@
+model:
+  target: models.diffusion.Lit_diffusion
+  params:
+    lr: 1e-4
+    sampling_step: 5
+    num_sampling: 20
+    img2img: True
+    optim_name: Adam
+    model_args:
+      num_train_timesteps: 1000
+      num_inference_steps: 1000
+      unet_config:
+        target: diffusers.models.unet_2d.UNet2DModel
+        params:
+          in_channels: 3
+          out_channels: 3
+          down_block_types:
+          - DownBlock2D
+          - AttnDownBlock2D
+          - AttnDownBlock2D
+          - AttnDownBlock2D
+          up_block_types:
+          - AttnUpBlock2D
+          - AttnUpBlock2D
+          - AttnUpBlock2D
+          - UpBlock2D
+          block_out_channels:
+          - 128
+          - 128
+          - 256
+          - 512
+      
+logger:
+  logger_path: checkpoints
+    
+lightning:
+  trainer:
+    strategy: ddp_find_unused_parameters_True
+    precision: 16-mixed
+    max_epochs: 100000
+    sync_batchnorm: True
+    # devices: [0]
+  earlystop_params:
+    monitor: val/loss
+    mode: min
+  monitor_params:
+    logging_interval: step
+
+dataset:
+  data_path: data
+  height: 32
+  width: 32
+  num_workers: 6
+  batch_size: 32
