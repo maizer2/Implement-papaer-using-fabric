@@ -346,7 +346,7 @@ class diffusers_PNDM(nn.Module):
         return pred_x0
     
     def forward(self, x0, noise):
-        t = torch.randint(0, len(self.scheduler.timesteps), (x0.size(0), ), dtype=torch.long, device=x0.device)
+        t = torch.randint(0, len(self.scheduler._timesteps), (x0.size(0), ), dtype=torch.long, device=x0.device)
         xT = self.forward_diffusion_process(x0, noise, t)
         
         rec_sample = self.unet(xT, t).sample
