@@ -364,7 +364,6 @@ class diffusers_PNDM(nn.Module):
     
     def get_loss(self, batch):
         x0, text = self.get_input(batch)
-        x0 = self.vae.encode(x0).latent_dist.sample()* self.vae.config.scaling_factor
         noise = torch.randn(x0.shape, dtype=x0.dtype, device=x0.device)
         
         rec_sample = self(x0, noise)
