@@ -25,7 +25,7 @@ def get_opt():
     parser.add_argument("--model_type", required=True,
                         choices=["ae", "cnn", "diffusion", "gan", "mlp", "vae"])
     parser.add_argument("--model_name", required=True,
-                        choices=["DDPM", "diffusers_DDPM", "diffusers_DDIM", "diffusers_LDM", "diffusers_text_to_LDM"])
+                        choices=["DDPM", "diffusers_DDPM", "diffusers_DDIM", "diffusers_PNDM", "diffusers_LDM", "diffusers_text_to_LDM"])
     parser.add_argument("--dataset", required=True,
                         choices=["MNIST", "CIFAL10"])
     
