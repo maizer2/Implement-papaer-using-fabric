@@ -25,7 +25,7 @@ def get_opt():
     parser.add_argument("--model_type", required=True,
                         choices=["ae", "cnn", "diffusion", "gan", "mlp", "vae"])
     parser.add_argument("--model_name", required=True,
-                        choices=["DDPM", "diffusers_DDPM"])
+                        choices=["DDPM", "diffusers_DDPM", "diffusers_DDIM", "diffusers_LDM", "diffusers_text_to_LDM"])
     parser.add_argument("--dataset", required=True,
                         choices=["MNIST", "CIFAL10"])
     
@@ -60,10 +60,15 @@ def get_config(opt):
 
 def get_dataloader(data_config, transform=None):
     if transform is None:
-        transform = transforms.Compose([transforms.ToTensor(),
-                                        transforms.Normalize((0.5, ), (0.5, )),
-                                        transforms.Resize((data_config.height, data_config.width), antialias=True)
-                                        ])
+        transform = [transforms.ToTensor(),
+                     transforms.Normalize((0.5, ), (0.5, )),
+                     transforms.Resize((data_config.height, data_config.width), antialias=True)]
+        
+        if data_config.name == "MNIST":
+            transform.insert(0, transforms.Grayscale(num_output_channels=3))
+            
+        transform = transforms.Compose(transform)
+        
     train_dataset = getattr(importlib.import_module("torchvision.datasets"), data_config.name)(root=data_config.data_path, 
                                                                                                 download=True, 
                                                                                                 transform=transform)
