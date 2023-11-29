@@ -13,10 +13,8 @@ from torchvision import transforms
 
 from run import get_obj_from_str, instantiate_from_config
 
-from diffusers import DDPMScheduler, UNet2DModel, DDPMPipeline, DDIMScheduler, StableDiffusionPipeline
-from diffusers import AutoencoderKL
-from diffusers.schedulers.scheduling_pndm import PNDMScheduler
-from diffusers.pipelines.pndm import PNDMPipeline
+from diffusers import ControlNetModel, UNet2DConditionModel, AutoencoderKL, StableDiffusionControlNetPipeline
+
 
 from transformers import CLIPTextModel, CLIPTokenizer, CLIPFeatureExtractor
 
@@ -496,7 +494,7 @@ class diffusers_text_to_LDM(nn.Module):
         
         self.text_encoder = CLIPTextModel.from_pretrained("runwayml/stable-diffusion-v1-5", subfolder="text_encoder")
         self.tokenizer = CLIPTokenizer.from_pretrained("runwayml/stable-diffusion-v1-5", subfolder="tokenizer")
-        self.vae = AutoencoderKL.from_pretrained("runwayml/stable-diffusion-v1-5", subfolder="vae").eval()
+        self.vae = AutoencoderKL.from_pretrained("runwayml/stable-diffusion-v1-5", subfolder="vae")
         self.unet = instantiate_from_config(unet_config)
         self.scheduler = instantiate_from_config(scheduler_config)
 
@@ -603,6 +601,155 @@ class diffusers_text_to_LDM(nn.Module):
 
         return encoder_hidden_states
 
+class diffusers_ControlNet_with_StableDiffusion(nn.Module):
+    def __init__(self,
+                 controlnet_config: str,
+                 scheduler_config: str,
+                 num_inference_steps: int = 50,
+                 controlnet_conditioning_scale: float = 1.0):
+        super().__init__()
+        self.criterion = nn.MSELoss()
+        
+        self.num_inference_steps = num_inference_steps
+        self.controlnet_conditioning_scale = controlnet_conditioning_scale
+        
+        self.text_encoder = CLIPTextModel.from_pretrained("runwayml/stable-diffusion-v1-5", subfolder="text_encoder")
+        self.tokenizer = CLIPTokenizer.from_pretrained("runwayml/stable-diffusion-v1-5", subfolder="tokenizer")
+        
+        self.vae = AutoencoderKL.from_pretrained("runwayml/stable-diffusion-v1-5", subfolder="vae")
+        self.unet = UNet2DConditionModel.from_pretrained("runwayml/stable-diffusion-v1-5", subfolder="unet")
+        self.controlnet = instantiate_from_config(controlnet_config)
+        
+        self.scheduler = instantiate_from_config(scheduler_config)
+        
+        self.model_eval([self.vae, self.text_encoder, self.unet])
+        
+    def model_eval(self, models: list):
+        for model in models:
+            model.requires_grad_(False)
+            model.eval()
+            
+    def forward_diffusion_process(self, z0, noise = None, t = None) -> torch.FloatTensor:
+        if noise is None:
+            noise = torch.randn(z0.shape, dtype=z0.dtype, device=z0.device)
+        
+        if t is None:
+            t = torch.full((z0.size(0), ), self.scheduler.timesteps[0], dtype=torch.long, device=z0.device)
+            
+        xT = self.scheduler.add_noise(z0, noise, t)
+    
+        return xT
+    
+    def reverse_diffusion_process(self, zT = None, shape = None, prompt_embeds = None, controlnet_cond = None) -> torch.FloatTensor:
+        if zT is None:
+            zT = torch.randn(shape, dtype=torch.float32).cuda()
+        
+        if prompt_embeds is None:
+            prompt_embeds = self.encode_prompt(["" * shape[0]])
+        
+        if controlnet_cond is None:
+            controlnet_cond = zT
+            
+        pred_x0 = zT
+        self.scheduler.set_timesteps(self.num_inference_steps, zT.device)
+        for t in self.scheduler.timesteps:
+            down_block_res_samples, mid_block_res_sample = self.get_controlnet_hidden_blocks(pred_x0, 
+                                                                                             t, 
+                                                                                             prompt_embeds, 
+                                                                                             controlnet_cond)
+            
+            # 1. predict noise model_output
+            model_output = self.unet(pred_x0, t, prompt_embeds,
+                                     down_block_additional_residuals=down_block_res_samples,
+                                     mid_block_additional_residual=mid_block_res_sample
+                                     ).sample
+
+            # 2. compute previous image: x_t -> x_t-1
+            pred_x0 = self.scheduler.step(model_output, t, pred_x0).prev_sample
+        
+        return pred_x0
+    
+    def forward(self, z0, noise, prompt_embeds, controlnet_cond):
+        t = torch.randint(0, len(self.scheduler.timesteps), (z0.size(0), ), dtype=torch.long, device=z0.device)
+        zT = self.forward_diffusion_process(z0, noise, t)
+        down_block_res_samples, mid_block_res_sample = self.get_controlnet_hidden_blocks(zT, t, prompt_embeds, controlnet_cond)
+        
+        rec_sample = self.unet(zT, t, prompt_embeds,
+                               down_block_additional_residuals=down_block_res_samples,
+                               mid_block_additional_residual=mid_block_res_sample
+                               ).sample
+        
+        return rec_sample
+    
+    def get_input(self, batch, num_sampling = None):
+        x0, text = batch
+        
+        if num_sampling is not None:
+            x0 = x0[:num_sampling]
+            text = text[:num_sampling]
+        
+        prompt = []
+        for t in text:
+            prompt.append(str(t.item()))
+                
+        return x0, prompt
+    
+    def get_loss(self, batch):
+        x0, text = self.get_input(batch)
+        
+        z0 = self.vae.encode(x0).latent_dist.sample() * self.vae.config.scaling_factor
+        prompt_embeds = self.encode_prompt(text)
+        noise = torch.randn(z0.shape, dtype=z0.dtype, device=z0.device)
+        
+        rec_sample = self(z0, noise, prompt_embeds, x0)
+        
+        loss = self.criterion(noise, rec_sample)
+        
+        return loss
+    
+    def inference(self, batch, num_sampling, img2img = True):
+        self.unet.eval()
+        
+        with torch.no_grad():
+            if img2img:
+                x0, text = self.get_input(batch, num_sampling)
+                prompt_embeds = self.encode_prompt(text)
+                
+                x0 = self.vae.encode(x0).latent_dist.sample()* self.vae.config.scaling_factor
+                xT = self.forward_diffusion_process(x0)
+            else:
+                xT, prompt_embeds = None, None
+            
+            pred_x0 = self.reverse_diffusion_process(xT, x0.shape, prompt_embeds, x0)
+            pred_x0 = self.vae.decode(pred_x0).sample
+        
+        self.unet.train()
+        
+        return pred_x0
+    
+    def encode_prompt(self, text):
+        with torch.no_grad():
+            tokenized_text = self.tokenizer(text,
+                                            padding="max_length",
+                                            max_length=self.tokenizer.model_max_length,
+                                            truncation=True,
+                                            return_tensors="pt").input_ids.cuda()
+            
+            encoder_hidden_states = self.text_encoder(tokenized_text).last_hidden_state
+
+        return encoder_hidden_states
+
+    def get_controlnet_hidden_blocks(self, zT, t, prompt_embeds, controlnet_cond):
+        down_block_res_samples, mid_block_res_sample = self.controlnet(zT, t, prompt_embeds, controlnet_cond,
+                                                                        return_dict=False)
+        down_block_res_samples = [
+            down_block_res_sample * self.controlnet_conditioning_scale
+            for down_block_res_sample in down_block_res_samples
+        ]
+        mid_block_res_sample *= self.controlnet_conditioning_scale
+        
+        return down_block_res_samples, mid_block_res_sample
+    
 class Lit_diffusion(pl.LightningModule):
     def __init__(self,
                  lr: float,
@@ -621,7 +768,7 @@ class Lit_diffusion(pl.LightningModule):
         self.model = getattr(importlib.import_module(__name__), model_name)(**model_args)
         
     def configure_optimizers(self):
-        optim = self.optimizer(self.model.unet.parameters(), self.lr)
+        optim = self.optimizer(self.model.parameters(), self.lr)
         
         lambda1 = lambda epoch: epoch // 30
         lambda2 = lambda epoch: 0.95 ** epoch

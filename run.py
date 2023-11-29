@@ -26,7 +26,7 @@ def get_opt():
                         choices=["ae", "cnn", "diffusion", "gan", "mlp", "vae"])
     parser.add_argument("--model_name", required=True,
                         choices=["DDPM", "diffusers_DDPM", "diffusers_DDIM", "diffusers_PNDM", 
-                                 "diffusers_LDM", "diffusers_text_to_LDM"])
+                                 "diffusers_LDM", "diffusers_text_to_LDM", "diffusers_ControlNet_with_StableDiffusion"])
     parser.add_argument("--dataset", required=True,
                         choices=["MNIST", "CIFAR10"])
     
@@ -49,7 +49,10 @@ def get_config(opt):
     base_logger_path = os.path.join(logger_config.logger_path, opt.model_type, opt.model_name, opt.dataset)
     
     model_config.params["model_name"] = opt.model_name
-    model_config.params.model_args.unet_config["sample_size"] = (data_config.height, data_config.width)
+    try:
+        model_config.params.model_args.unet_config["sample_size"] = (data_config.height, data_config.width)
+    except:
+        pass
     
     logger_config.logger_path = os.path.join(base_logger_path, str(data_config.height))
     
