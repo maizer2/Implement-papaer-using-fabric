@@ -25,9 +25,10 @@ def get_opt():
     parser.add_argument("--model_type", required=True,
                         choices=["ae", "cnn", "diffusion", "gan", "mlp", "vae"])
     parser.add_argument("--model_name", required=True,
-                        choices=["DDPM", "diffusers_DDPM", "diffusers_DDIM", "diffusers_PNDM", "diffusers_LDM", "diffusers_text_to_LDM"])
+                        choices=["DDPM", "diffusers_DDPM", "diffusers_DDIM", "diffusers_PNDM", 
+                                 "diffusers_LDM", "diffusers_text_to_LDM"])
     parser.add_argument("--dataset", required=True,
-                        choices=["MNIST", "CIFAL10"])
+                        choices=["MNIST", "CIFAR10"])
     
     opt = parser.parse_args()
     return opt
@@ -70,15 +71,15 @@ def get_dataloader(data_config, transform=None):
         transform = transforms.Compose(transform)
         
     train_dataset = getattr(importlib.import_module("torchvision.datasets"), data_config.name)(root=data_config.data_path, 
-                                                                                                download=True, 
-                                                                                                transform=transform)
+                                                                                               download=True, 
+                                                                                               transform=transform)
     
     train_dataset, val_dataset = data.random_split(train_dataset, [int(len(train_dataset) * 0.8), len(train_dataset) - int(len(train_dataset) * 0.8)])
     
     test_dataset = getattr(importlib.import_module("torchvision.datasets"), data_config.name)(root=data_config.data_path, 
-                                                                                                download=True,
-                                                                                                train=False,
-                                                                                                transform=transform)
+                                                                                              download=True,
+                                                                                              train=False,
+                                                                                              transform=transform)
     train_loader = data.DataLoader(train_dataset, 
                                    batch_size=data_config.batch_size, 
                                    num_workers=data_config.num_workers,

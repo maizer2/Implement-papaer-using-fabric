@@ -407,8 +407,9 @@ class diffusers_LDM(nn.Module):
         
     def model_eval(self, models: list):
         for model in models:
+            model.requires_grad_(False)
             model.eval()
-            
+             
     def forward_diffusion_process(self, x0, noise = None, t = None) -> torch.FloatTensor:
         if noise is None:
             noise = torch.randn(x0.shape, dtype=x0.dtype, device=x0.device)
@@ -495,7 +496,7 @@ class diffusers_text_to_LDM(nn.Module):
         
         self.text_encoder = CLIPTextModel.from_pretrained("runwayml/stable-diffusion-v1-5", subfolder="text_encoder")
         self.tokenizer = CLIPTokenizer.from_pretrained("runwayml/stable-diffusion-v1-5", subfolder="tokenizer")
-        self.vae = AutoencoderKL.from_pretrained("runwayml/stable-diffusion-v1-5", subfolder="vae")
+        self.vae = AutoencoderKL.from_pretrained("runwayml/stable-diffusion-v1-5", subfolder="vae").eval()
         self.unet = instantiate_from_config(unet_config)
         self.scheduler = instantiate_from_config(scheduler_config)
 
@@ -503,6 +504,7 @@ class diffusers_text_to_LDM(nn.Module):
         
     def model_eval(self, models: list):
         for model in models:
+            model.requires_grad_(False)
             model.eval()
             
     def forward_diffusion_process(self, x0, noise = None, t = None) -> torch.FloatTensor:
@@ -559,7 +561,7 @@ class diffusers_text_to_LDM(nn.Module):
     def get_loss(self, batch):
         x0, text = self.get_input(batch)
         
-        x0 = self.vae.encode(x0).latent_dist.sample()* self.vae.config.scaling_factor
+        x0 = self.vae.encode(x0).latent_dist.sample() * self.vae.config.scaling_factor
         prompt_embeds = self.encode_prompt(text)
         noise = torch.randn(x0.shape, dtype=x0.dtype, device=x0.device)
         
@@ -590,13 +592,14 @@ class diffusers_text_to_LDM(nn.Module):
         return pred_x0
     
     def encode_prompt(self, text):
-        tokenized_text = self.tokenizer(text,
-                                        padding="max_length",
-                                        max_length=self.tokenizer.model_max_length,
-                                        truncation=True,
-                                        return_tensors="pt").input_ids.cuda()
-        
-        encoder_hidden_states = self.text_encoder(tokenized_text).last_hidden_state
+        with torch.no_grad():
+            tokenized_text = self.tokenizer(text,
+                                            padding="max_length",
+                                            max_length=self.tokenizer.model_max_length,
+                                            truncation=True,
+                                            return_tensors="pt").input_ids.cuda()
+            
+            encoder_hidden_states = self.text_encoder(tokenized_text).last_hidden_state
 
         return encoder_hidden_states
 
@@ -691,5 +694,4 @@ class Lit_diffusion(pl.LightningModule):
                 if self.current_epoch == 0:
                     self.sampling(batch, prefix)
                 elif (self.current_epoch + 1) % self.sampling_step == 0:
-                    self.sampling(batch, prefix)
-                
+                    self.sampling(batch, prefix)                

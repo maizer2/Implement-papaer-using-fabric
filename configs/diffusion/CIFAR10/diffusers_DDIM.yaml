@@ -7,7 +7,7 @@ model:
     img2img: True
     optim_name: Adam
     model_args:
-      num_inference_steps: 1000
+      num_inference_steps: 50
       unet_config:
         target: diffusers.models.unet_2d.UNet2DModel
         params:
@@ -29,7 +29,7 @@ model:
           - 256
           - 512
       scheduler_config:
-        target: diffusers.schedulers.scheduling_pndm.PNDMScheduler
+        target: diffusers.schedulers.scheduling_ddim.DDIMScheduler
         params:
           num_train_timesteps: 1000
 

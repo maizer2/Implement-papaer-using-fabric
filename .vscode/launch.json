@@ -12,7 +12,8 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "args": ["--model_type", "diffusion",
-                     "--model_name", "diffusers_DDPM"]
+                     "--model_name", "diffusers_text_to_LDM",
+                     "--dataset", "CIFAR10"]
         }
     ]
 }
