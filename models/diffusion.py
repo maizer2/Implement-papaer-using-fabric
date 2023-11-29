@@ -408,38 +408,38 @@ class diffusers_LDM(nn.Module):
             model.requires_grad_(False)
             model.eval()
              
-    def forward_diffusion_process(self, x0, noise = None, t = None) -> torch.FloatTensor:
+    def forward_diffusion_process(self, z0, noise = None, t = None) -> torch.FloatTensor:
         if noise is None:
-            noise = torch.randn(x0.shape, dtype=x0.dtype, device=x0.device)
+            noise = torch.randn(z0.shape, dtype=z0.dtype, device=z0.device)
         
         if t is None:
-            t = torch.full((x0.size(0), ), self.scheduler.timesteps[0], dtype=torch.long, device=x0.device)
+            t = torch.full((z0.size(0), ), self.scheduler.timesteps[0], dtype=torch.long, device=z0.device)
             
-        xT = self.scheduler.add_noise(x0, noise, t)
+        zT = self.scheduler.add_noise(z0, noise, t)
     
-        return xT
+        return zT
     
-    def reverse_diffusion_process(self, xT = None, shape = None) -> torch.FloatTensor:
-        if xT is None:
-            xT = torch.randn(shape, dtype=torch.float32).cuda()
+    def reverse_diffusion_process(self, zT = None, shape = None) -> torch.FloatTensor:
+        if zT is None:
+            zT = torch.randn(shape, dtype=torch.float32).cuda()
         
-        pred_x0 = xT
-        self.scheduler.set_timesteps(self.num_inference_steps, xT.device)
+        pred_z0 = zT
+        self.scheduler.set_timesteps(self.num_inference_steps, zT.device)
         for t in self.scheduler.timesteps:
             
             # 1. predict noise model_output
-            model_output = self.unet(pred_x0, t).sample
+            model_output = self.unet(pred_z0, t).sample
 
             # 2. compute previous image: x_t -> x_t-1
-            pred_x0 = self.scheduler.step(model_output, t, pred_x0).prev_sample
+            pred_z0 = self.scheduler.step(model_output, t, pred_z0).prev_sample
         
-        return pred_x0
+        return pred_z0
     
-    def forward(self, x0, noise):
-        t = torch.randint(0, len(self.scheduler.timesteps), (x0.size(0), ), dtype=torch.long, device=x0.device)
-        xT = self.forward_diffusion_process(x0, noise, t)
+    def forward(self, z0, noise):
+        t = torch.randint(0, len(self.scheduler.timesteps), (z0.size(0), ), dtype=torch.long, device=z0.device)
+        zT = self.forward_diffusion_process(z0, noise, t)
         
-        rec_sample = self.unet(xT, t).sample
+        rec_sample = self.unet(zT, t).sample
         
         return rec_sample
     
@@ -453,11 +453,11 @@ class diffusers_LDM(nn.Module):
         return x0, text
     
     def get_loss(self, batch):
-        x0, text = self.get_input(batch)
-        x0 = self.vae.encode(x0).latent_dist.sample()* self.vae.config.scaling_factor
-        noise = torch.randn(x0.shape, dtype=x0.dtype, device=x0.device)
+        x0, _ = self.get_input(batch)
+        z0 = self.vae.encode(x0).latent_dist.sample()* self.vae.config.scaling_factor
+        noise = torch.randn(z0.shape, dtype=z0.dtype, device=z0.device)
         
-        rec_sample = self(x0, noise)
+        rec_sample = self(z0, noise)
         
         loss = self.criterion(noise, rec_sample)
         
@@ -470,13 +470,13 @@ class diffusers_LDM(nn.Module):
             x0, _ = self.get_input(batch, num_sampling)
             
             if img2img:
-                x0 = self.vae.encode(x0).latent_dist.sample()* self.vae.config.scaling_factor
-                xT = self.forward_diffusion_process(x0)
+                z0 = self.vae.encode(x0).latent_dist.sample()* self.vae.config.scaling_factor
+                zT = self.forward_diffusion_process(z0)
             else:
-                xT = None
+                zT = None
             
-            pred_x0 = self.reverse_diffusion_process(xT, x0.shape)
-            pred_x0 = self.vae.decode(pred_x0).sample
+            pred_z0 = self.reverse_diffusion_process(zT, x0.shape)
+            pred_x0 = self.vae.decode(pred_z0).sample
         
         self.unet.train()
         
@@ -505,41 +505,41 @@ class diffusers_text_to_LDM(nn.Module):
             model.requires_grad_(False)
             model.eval()
             
-    def forward_diffusion_process(self, x0, noise = None, t = None) -> torch.FloatTensor:
+    def forward_diffusion_process(self, z0, noise = None, t = None) -> torch.FloatTensor:
         if noise is None:
-            noise = torch.randn(x0.shape, dtype=x0.dtype, device=x0.device)
+            noise = torch.randn(z0.shape, dtype=z0.dtype, device=z0.device)
         
         if t is None:
-            t = torch.full((x0.size(0), ), self.scheduler.timesteps[0], dtype=torch.long, device=x0.device)
+            t = torch.full((z0.size(0), ), self.scheduler.timesteps[0], dtype=torch.long, device=x0.device)
             
-        xT = self.scheduler.add_noise(x0, noise, t)
+        zT = self.scheduler.add_noise(z0, noise, t)
     
-        return xT
+        return zT
     
-    def reverse_diffusion_process(self, xT = None, shape = None, prompt_embeds = None) -> torch.FloatTensor:
-        if xT is None:
-            xT = torch.randn(shape, dtype=torch.float32).cuda()
+    def reverse_diffusion_process(self, zT = None, shape = None, prompt_embeds = None) -> torch.FloatTensor:
+        if zT is None:
+            zT = torch.randn(shape, dtype=torch.float32).cuda()
         
         if prompt_embeds is None:
             prompt_embeds = self.encode_prompt(["" * shape[0]])
             
-        pred_x0 = xT
-        self.scheduler.set_timesteps(self.num_inference_steps, xT.device)
+        pred_z0 = zT
+        self.scheduler.set_timesteps(self.num_inference_steps, zT.device)
         for t in self.scheduler.timesteps:
             
             # 1. predict noise model_output
-            model_output = self.unet(pred_x0, t, prompt_embeds).sample
+            model_output = self.unet(pred_z0, t, prompt_embeds).sample
 
             # 2. compute previous image: x_t -> x_t-1
-            pred_x0 = self.scheduler.step(model_output, t, pred_x0).prev_sample
+            pred_z0 = self.scheduler.step(model_output, t, pred_z0).prev_sample
         
-        return pred_x0
+        return pred_z0
     
-    def forward(self, x0, noise, prompt_embeds):
+    def forward(self, z0, noise, prompt_embeds):
         t = torch.randint(0, len(self.scheduler.timesteps), (x0.size(0), ), dtype=torch.long, device=x0.device)
-        xT = self.forward_diffusion_process(x0, noise, t)
+        zT = self.forward_diffusion_process(z0, noise, t)
         
-        rec_sample = self.unet(xT, t, prompt_embeds).sample
+        rec_sample = self.unet(zT, t, prompt_embeds).sample
         
         return rec_sample
     
@@ -559,11 +559,11 @@ class diffusers_text_to_LDM(nn.Module):
     def get_loss(self, batch):
         x0, text = self.get_input(batch)
         
-        x0 = self.vae.encode(x0).latent_dist.sample() * self.vae.config.scaling_factor
+        z0 = self.vae.encode(x0).latent_dist.sample() * self.vae.config.scaling_factor
         prompt_embeds = self.encode_prompt(text)
-        noise = torch.randn(x0.shape, dtype=x0.dtype, device=x0.device)
+        noise = torch.randn(z0.shape, dtype=z0.dtype, device=z0.device)
         
-        rec_sample = self(x0, noise, prompt_embeds)
+        rec_sample = self(z0, noise, prompt_embeds)
         
         loss = self.criterion(noise, rec_sample)
         
@@ -577,13 +577,13 @@ class diffusers_text_to_LDM(nn.Module):
                 x0, text = self.get_input(batch, num_sampling)
                 prompt_embeds = self.encode_prompt(text)
                 
-                x0 = self.vae.encode(x0).latent_dist.sample()* self.vae.config.scaling_factor
-                xT = self.forward_diffusion_process(x0)
+                z0 = self.vae.encode(x0).latent_dist.sample()* self.vae.config.scaling_factor
+                zT = self.forward_diffusion_process(z0)
             else:
-                xT, prompt_embeds = None, None
+                zT, prompt_embeds = None, None
             
-            pred_x0 = self.reverse_diffusion_process(xT, x0.shape, prompt_embeds)
-            pred_x0 = self.vae.decode(pred_x0).sample
+            pred_z0 = self.reverse_diffusion_process(zT, x0.shape, prompt_embeds)
+            pred_x0 = self.vae.decode(pred_z0).sample
         
         self.unet.train()
         
