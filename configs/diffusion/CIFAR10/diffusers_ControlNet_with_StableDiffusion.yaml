@@ -55,4 +55,4 @@ dataset:
   height: 512
   width: 512
   num_workers: 6
-  batch_size: 8
+  batch_size: 16

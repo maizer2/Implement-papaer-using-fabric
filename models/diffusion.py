@@ -536,7 +536,7 @@ class diffusers_text_to_LDM(nn.Module):
         return pred_z0
     
     def forward(self, z0, noise, prompt_embeds):
-        t = torch.randint(0, len(self.scheduler.timesteps), (x0.size(0), ), dtype=torch.long, device=x0.device)
+        t = torch.randint(0, len(self.scheduler.timesteps), (z0.size(0), ), dtype=torch.long, device=z0.device)
         zT = self.forward_diffusion_process(z0, noise, t)
         
         rec_sample = self.unet(zT, t, prompt_embeds).sample
@@ -708,22 +708,22 @@ class diffusers_ControlNet_with_StableDiffusion(nn.Module):
         return loss
     
     def inference(self, batch, num_sampling, img2img = True):
-        self.unet.eval()
+        self.controlnet.eval()
         
         with torch.no_grad():
             if img2img:
                 x0, text = self.get_input(batch, num_sampling)
                 prompt_embeds = self.encode_prompt(text)
                 
-                x0 = self.vae.encode(x0).latent_dist.sample()* self.vae.config.scaling_factor
-                xT = self.forward_diffusion_process(x0)
+                z0 = self.vae.encode(x0).latent_dist.sample()* self.vae.config.scaling_factor
+                zT = self.forward_diffusion_process(z0)
             else:
-                xT, prompt_embeds = None, None
+                zT, prompt_embeds = None, None
             
-            pred_x0 = self.reverse_diffusion_process(xT, x0.shape, prompt_embeds, x0)
-            pred_x0 = self.vae.decode(pred_x0).sample
+            pred_z0 = self.reverse_diffusion_process(zT, zT.shape, prompt_embeds, x0)
+            pred_x0 = self.vae.decode(pred_z0).sample
         
-        self.unet.train()
+        self.controlnet.train()
         
         return pred_x0
     
