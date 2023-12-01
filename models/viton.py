@@ -13,7 +13,7 @@ from torchvision import transforms
 
 from run import get_obj_from_str, instantiate_from_config
 
-from diffusers import ControlNetModel, UNet2DConditionModel, AutoencoderKL, StableDiffusionControlNetPipeline
+from diffusers import ControlNetModel, UNet2DModel, AutoencoderKL, StableDiffusionControlNetPipeline
 
 
 from transformers import CLIPTextModel, CLIPTokenizer, CLIPFeatureExtractor
@@ -30,14 +30,25 @@ class VITON(nn.Module):
     https://arxiv.org/abs/1711.08447v4
     '''
     def __init__(self, 
-                 stage: str):
+                 stage: str,
+                 Gc_config: dict,
+                 ):
+        self.stage = stage
+        self.GC = UNet2DModel(Gc_config)
+        self.GR = None
+        
+        self.Perceptual_loss = pass
+        self.L1_loss = pass
         pass
     
-    def stage_1(self):
+    def stage_1(self, I, M, c, p):
+        input = torch.cat([p, c], 1)
+        output = self.GC(input)
+        I_dot, M_dot = torch.split(output, 3, 1)
         loss = None
         return loss
     
-    def stage_2(self):
+    def stage_2(self, I, c_dot, I_dot):
         loss = None
         return loss
     
@@ -45,9 +56,22 @@ class VITON(nn.Module):
         pass
     
     def get_input(self, batch, num_sampling = None):
-        pass
+        I = batch["image"] # Reference_image
+        M = batch["inpaint_mask"] # GT Mask
+        
+        c = batch["cloth"] # Target_Clothing_image
+        
+        Pose_map = batch["pose_map"]
+        Body_shape = batch["im_pose"]
+        Face_and_Hair = batch["im_head"]
+        
+        p = torch.cat([Pose_map, Body_shape, Face_and_Hair], 1) # Person_Representation
+        
+        return I, M, c, p
     
     def get_loss(self, batch):
+        I, M, c, p = self.get_input(batch)
+        
         pass
     
     def inference(self, batch, num_sampling):
