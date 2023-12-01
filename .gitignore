@@ -7,3 +7,4 @@ hparams.yaml
 output
 *.jpg
 *.png
+checkpoints

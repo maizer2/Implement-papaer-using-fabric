@@ -52,8 +52,25 @@ lightning:
     logging_interval: step
 
 dataset:
-  data_path: data
   height: 512
   width: 512
   num_workers: 6
-  batch_size: 32
+  batch_size: 16
+  train:
+    target: torchvision.datasets.CIFAR10
+    params:
+      root: data/CIFAR10
+      download: True
+      train: True
+  val:
+    target: torchvision.datasets.CIFAR10
+    params:
+      root: data/CIFAR10
+      download: True
+      train: False
+  test:
+    target: torchvision.datasets.CIFAR10
+    params:
+      root: data/CIFAR10
+      download: True
+      train: False

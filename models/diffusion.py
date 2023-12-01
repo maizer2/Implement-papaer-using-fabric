@@ -399,6 +399,7 @@ class diffusers_LDM(nn.Module):
         
         self.vae = AutoencoderKL.from_pretrained("runwayml/stable-diffusion-v1-5", subfolder="vae")
         self.unet = instantiate_from_config(unet_config)
+        
         self.scheduler = instantiate_from_config(scheduler_config)
 
         self.model_eval([self.vae])
@@ -482,7 +483,7 @@ class diffusers_LDM(nn.Module):
         
         return pred_x0
     
-class diffusers_text_to_LDM(nn.Module):
+class diffusers_StableDiffusion(nn.Module):
     def __init__(self,
                  unet_config: str,
                  scheduler_config: str,
@@ -749,7 +750,7 @@ class diffusers_ControlNet_with_StableDiffusion(nn.Module):
         mid_block_res_sample *= self.controlnet_conditioning_scale
         
         return down_block_res_samples, mid_block_res_sample
-    
+
 class Lit_diffusion(pl.LightningModule):
     def __init__(self,
                  lr: float,
