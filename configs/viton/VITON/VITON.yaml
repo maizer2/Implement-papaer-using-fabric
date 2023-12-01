@@ -4,35 +4,32 @@ model:
     lr: 1e-4
     sampling_step: 5
     num_sampling: 20
-    img2img: True
     optim_name: Adam
     model_args:
-      num_inference_steps: 50
-      unet_config:
-        target: diffusers.models.unet_2d_condition.UNet2DConditionModel
+      stage: "stage_1"
+      GC_config:
+        target: diffusers.models.unet_2d.UNet2DModel
         params:
           in_channels: 4
           out_channels: 4
           down_block_types:
           - DownBlock2D
-          - CrossAttnDownBlock2D
-          - CrossAttnDownBlock2D
-          - CrossAttnDownBlock2D
+          - DownBlock2D
+          - DownBlock2D
+          - DownBlock2D
           up_block_types:
-          - CrossAttnUpBlock2D
-          - CrossAttnUpBlock2D
-          - CrossAttnUpBlock2D
+          - UpBlock2D
+          - UpBlock2D
+          - UpBlock2D
           - UpBlock2D
           block_out_channels:
-          - 320
-          - 640
-          - 1280
-          - 1280
-          cross_attention_dim: 768
-      scheduler_config:
-        target: diffusers.schedulers.scheduling_ddim.DDIMScheduler
+          - 256
+          - 512
+          - 1024
+          - 1024
+      GC_config:
+        target: 
         params:
-          num_train_timesteps: 1000
 
 logger:
   logger_path: checkpoints

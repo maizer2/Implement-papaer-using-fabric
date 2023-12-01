@@ -31,11 +31,12 @@ class VITON(nn.Module):
     '''
     def __init__(self, 
                  stage: str,
-                 Gc_config: dict,
+                 GC_config: dict,
+                 GR_config: dict,
                  ):
         self.stage = stage
-        self.GC = UNet2DModel(Gc_config)
-        self.GR = None
+        self.GC = instantiate_from_config(GC_config)
+        self.GR = instantiate_from_config(GR_config)
         
         self.Perceptual_loss = pass
         self.L1_loss = pass
