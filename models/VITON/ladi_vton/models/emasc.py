@@ -12,13 +12,21 @@ class EMASC(nn.Module):
     def __init__(self,
                  in_channels: List[int],
                  out_channels: List[int],
+                 int_layers: List[int] = None,
                  kernel_size: int = 3,
                  padding: int = 1,
                  stride: int = 1,
                  type: str = 'nonlinear',
                  model_path: str = None):
         super().__init__()
-
+        if int_layers is None:
+            int_layers = [i + 1 for i in range(len(in_channels))]
+        else:
+            if len(in_channels) != len(int_layers):
+                raise Exception("Not match lenght.")
+            
+        self.int_layers = int_layers
+        
         if type == 'linear':  # Linear EMASC
             self.conv = nn.ModuleList()
             for in_ch, out_ch in zip(in_channels, out_channels):

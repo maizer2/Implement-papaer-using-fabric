@@ -1,5 +1,5 @@
 import importlib, os
-from typing import Callable, Union
+from typing import Callable, Union, List, Tuple
 
 import lightning.pytorch as pl
 
@@ -10,7 +10,7 @@ from torch.optim.lr_scheduler import LambdaLR
 from torchvision.utils import make_grid
 from torchvision import transforms
 
-from diffusers import UNet2DConditionModel
+from diffusers import UNet2DConditionModel, StableDiffusionInpaintPipeline
 from transformers import CLIPTextModel, CLIPTokenizer, CLIPVisionModelWithProjection, AutoProcessor
 
 from models.VITON.ladi_vton.models.autoencoder_kl import AutoencoderKL
@@ -184,6 +184,7 @@ class ladi_vton(nn.Module):
                  inversion_adapter_config: dict = None,
                  in_channels: int = 31,
                  num_inference_steps = 50,
+                 img2img = False,
                  cloth_warpping = False,
                  cloth_refinement = False,
                  use_emasc = False):
@@ -193,6 +194,7 @@ class ladi_vton(nn.Module):
         self.dataset_name = dataset_name
         self.in_channels = in_channels
         self.num_inference_steps = num_inference_steps
+        self.img2img = img2img
         self.cloth_warpping = cloth_warpping
         self.cloth_refinement = cloth_refinement
         self.use_emasc = use_emasc
@@ -212,7 +214,6 @@ class ladi_vton(nn.Module):
         unet_init(self.unet, in_channels)
         
         if stage == "emasc":
-            self.emasc_int_layers = [1, 2, 3, 4, 5]
             self.emasc = instantiate_from_config(emasc_config)
             model_eval([self.emasc])
         elif stage == "inversion_adapter":
@@ -222,7 +223,6 @@ class ladi_vton(nn.Module):
                                                      clip_config=self.vision_encoder.config)
             model_eval([self.vision_encoder, self.inversion_adapter])
         else:
-            self.emasc_int_layers = [1, 2, 3, 4, 5]
             self.vision_encoder = CLIPVisionModelWithProjection.from_pretrained("laion/CLIP-ViT-H-14-laion2B-s32B-b79K")
             self.processor = AutoProcessor.from_pretrained("laion/CLIP-ViT-H-14-laion2B-s32B-b79K")
             self.emasc = instantiate_from_config(emasc_config)
@@ -299,6 +299,94 @@ class ladi_vton(nn.Module):
         
         return rec_sample
     
+    def get_tryon_input(self, batch, num_sampling = None):
+        I, C, C_W, I_M, m, p = self.get_input(batch, num_sampling)
+        
+        m = nn.functional.interpolate(m, size=(m.shape[2] // 8, m.shape[3] // 8), mode="bilinear")
+        p = nn.functional.interpolate(p, size=(p.shape[2] // 8, p.shape[3] // 8), mode="bilinear")
+        latent = self.vae.encode(I)[0].latent_dist.sample() * self.vae.config.scaling_factor
+        C_W = self.vae.encode(C_W)[0].latent_dist.sample() * self.vae.config.scaling_factor
+        I_M, I_M_intermediate_features = self.vae.encode(I_M)
+        I_M = I_M.latent_dist.sample() * self.vae.config.scaling_factor
+        
+        unet_input = torch.cat([m, p, C_W, I_M], 1)
+        noise = torch.randn(latent.shape, dtype=torch.float32).cuda()
+        encoder_hidden_states = self.get_encoder_hidden_states(C, batch["category"])
+        
+        I_M_intermediate_features = self.get_intermediate_features(I_M_intermediate_features)
+        
+        return latent, unet_input, noise, encoder_hidden_states, I_M_intermediate_features
+    
+    def get_input(self, batch, num_sampling = None):
+        I = batch["image"]
+        C = batch["cloth"]
+        I_M = batch["im_mask"]
+        m = batch["inpaint_mask"].to(torch.float32)
+        p = batch["pose_map"]
+        C_W = self.get_warped_cloth(batch)
+        
+        if num_sampling is not None:
+            I = I[:num_sampling]
+            C = C[:num_sampling]
+            I_M = I_M[:num_sampling]
+            m = m[:num_sampling]
+            p = p[:num_sampling]
+            C_W = C_W[:num_sampling]
+        
+                        
+        return I, C, C_W, I_M, m, p
+    
+    def get_loss(self, batch):
+        if self.stage == "emasc":
+            loss = self.train_emasc(batch)
+        elif self.stage == "inversion_adapter":
+            loss = self.train_inversion_adapter(batch)
+        else:
+            self.inference(batch, 20)
+            exit()
+            loss = self.train_tryon(batch)
+            
+        return loss
+    
+    def tryon_inference(self, batch, num_sampling):
+        latent, unet_input, noise, encoder_hidden_states, I_M_intermediate_features = self.get_tryon_input(batch, num_sampling)
+        
+        self.unet.eval()
+        
+        with torch.no_grad():
+            if self.img2img:
+                zT = self.forward_diffusion_process(latent, noise)
+            else:
+                zT = None
+            
+            pred_z0 = self.reverse_diffusion_process(zT, latent.shape, unet_input, encoder_hidden_states)
+            if self.use_emasc:
+                pred_x0 = self.vae.decode(pred_z0, I_M_intermediate_features, self.emasc.int_layers).sample
+            else:
+                pred_x0 = self.vae.decode(pred_z0).sample
+                
+        self.unet.train()
+        
+        return pred_x0
+    
+    def inference(self, batch, num_sampling) -> torch.Tensor:
+        if self.stage == "tryon":
+            pred = self.tryon_inference(batch, num_sampling)
+            
+        return pred
+    
+    def get_image_log(self, batch, num_sampling) -> List[Tuple[str, torch.Tensor]]:
+        I, C, C_W, I_M, m, _ = self.get_input(batch, num_sampling)
+        pred = self.inference(batch, num_sampling)
+        
+        return [("image", I), 
+                ("cloth", C), 
+                ("warped_cloth", C_W), 
+                ("image_mask", I_M),
+                ("inpaint_mask", m),
+                ("skeleton", batch["skeleton"]),
+                ("result", pred)]
+        
     def warping_cloth(self, batch):
         cloth = batch["cloth"]
         im_mask = batch["im_mask"]
@@ -343,75 +431,11 @@ class ladi_vton(nn.Module):
         
         return warped_cloth
     
-    def get_tryon_input(self, batch, num_sampling = None):
-        I, C, C_W, I_M, m, p = self.get_input(batch, num_sampling)
+    def get_intermediate_features(self, intermediate_features):
+        intermediate_features = [intermediate_features[i] for i in self.emasc.int_layers]
+        processed_intermediate_features = self.emasc(intermediate_features)
         
-        m = nn.functional.interpolate(m, size=(m.shape[2] // 8, m.shape[3] // 8), mode="bilinear")
-        p = nn.functional.interpolate(p, size=(p.shape[2] // 8, p.shape[3] // 8), mode="bilinear")
-        latent = self.vae.encode(I)[0].latent_dist.sample() * self.vae.config.scaling_factor
-        C_W = self.vae.encode(C_W)[0].latent_dist.sample() * self.vae.config.scaling_factor
-        I_M, I_M_intermediate_features = self.vae.encode(I_M)
-        I_M = I_M.latent_dist.sample() * self.vae.config.scaling_factor
-        
-        unet_input = torch.cat([m, p, C_W, I_M], 1)
-        noise = torch.randn(latent.shape, dtype=torch.float32).cuda()
-        encoder_hidden_states = self.get_encoder_hidden_states(C, batch["category"])
-        
-        return latent, unet_input, noise, encoder_hidden_states, I_M_intermediate_features
-    
-    def get_input(self, batch, num_sampling = None):
-        I = batch["image"]
-        C = batch["cloth"]
-        I_M = batch["im_mask"]
-        m = batch["inpaint_mask"].to(torch.float32)
-        p = batch["pose_map"]
-        C_W = self.get_warped_cloth(batch)
-        
-        if num_sampling is not None:
-            I = I[:num_sampling]
-            C = C[:num_sampling]
-            I_M = I_M[:num_sampling]
-            m = m[:num_sampling]
-            p = p[:num_sampling]
-            C_W = C_W[:num_sampling]
-        
-                        
-        return I, C, C_W, I_M, m, p
-    
-    def get_loss(self, batch):
-        if self.stage == "emasc":
-            loss = self.train_emasc(batch)
-        elif self.stage == "inversion_adapter":
-            loss = self.train_inversion_adapter(batch)
-        else:
-            loss = self.train_tryon(batch)
-            
-        return loss
-    
-    def tryon_inference(self, batch, num_sampling, img2img):
-        latent, unet_input, noise, encoder_hidden_states, I_M_intermediate_features = self.get_tryon_input(batch, num_sampling)
-        
-        self.unet.eval()
-        with torch.no_grad():
-            if img2img:
-                zT = self.forward_diffusion_process(latent, noise)
-            else:
-                zT = None
-            
-            pred_z0 = self.reverse_diffusion_process(zT, latent.shape, unet_input, encoder_hidden_states)
-            if self.use_emasc:
-                pred_x0 = self.vae.decode(pred_z0, I_M_intermediate_features, self.emasc_int_layers).sample
-            else:
-                pred_x0 = self.vae.decode(pred_z0).sample
-        self.unet.train()
-        
-        return pred_x0
-        
-    def inference(self, batch, num_sampling, img2img = False):
-        if self.stage == "tryon":
-            pred = self.tryon_inference(batch, num_sampling, img2img)
-            
-        return batch["image"], pred
+        return processed_intermediate_features
     
     def get_word_embedding(self, cloth):
         # Get the visual features of the in-shop cloths
@@ -509,12 +533,7 @@ class Lit_viton(pl.LightningModule):
             self.model.save_warped_image(batch)
         else:
             x0, x0_hat = self.predict(batch)
-     
-    def predict(self, batch, model_save = False):
-        outputs: tuple = self.model.inference(batch, self.num_sampling, model_save)
-        
-        return outputs
-        
+             
     def logging_loss(self, loss, prefix):
         self.log(f'{prefix}/loss', loss, prog_bar=True, sync_dist=True)
         
@@ -534,8 +553,8 @@ class Lit_viton(pl.LightningModule):
         
         return outputs
     
-    def sampling(self, batch, prefix="train", model_save=False):
-        outputs = self.predict(batch, model_save)
+    def sampling(self, batch, prefix="train"):
+        outputs = self.model.get_image_log(batch, self.num_sampling)
         
         output_grids = self.get_grid(outputs)
         

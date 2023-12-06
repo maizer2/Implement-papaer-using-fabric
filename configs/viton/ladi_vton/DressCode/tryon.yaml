@@ -13,6 +13,7 @@ model:
       num_inference_steps: 50
       cloth_warpping: True
       cloth_refinement: True
+      use_emasc: True
       scheduler_config:
         target: diffusers.schedulers.scheduling_ddim.DDIMScheduler
         params:
@@ -22,6 +23,7 @@ model:
         params:
           in_channels: [128, 128, 128, 256, 512]
           out_channels: [128, 256, 512, 512, 512]
+          int_layers: [1, 2, 3, 4, 5]
           kernel_size: 3
           padding: 1
           stride: 1

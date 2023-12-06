@@ -101,10 +101,11 @@ class Encoder(nn.Module):
         intermediate_features = [x]
         sample = self.conv_in(sample)
         intermediate_features.append(sample)
+        
         # down
         for down_block in self.down_blocks:
-            sample = down_block(sample)
             intermediate_features.append(sample)
+            sample = down_block(sample)
 
         # middle
         sample = self.mid_block(sample)
