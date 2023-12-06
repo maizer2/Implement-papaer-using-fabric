@@ -1,0 +1,114 @@
+model:
+  target: models.viton.Lit_viton
+  params:
+    lr: 1e-4
+    sampling_step: 5
+    num_sampling: 20
+    optim_name: AdamW
+    model_name: ladi_vton
+    model_args:
+      stage: emasc
+      dataset_name: dresscode
+      in_channels: 31
+      num_inference_steps: 50
+      cloth_refinement: False
+      scheduler_config:
+        target: diffusers.schedulers.scheduling_ddim.DDIMScheduler
+        params:
+          num_train_timesteps: 1000
+      emasc_config:
+        in_channels: [128, 128, 128, 256, 512]
+        out_channels: [128, 256, 512, 512, 512]
+        kernel_size: 3
+        padding: 1
+        stride: 1
+        type: nonlinear # linear, nonlinear
+
+        
+
+
+logger:
+  logger_path: checkpoints/viton/ladi_vton/tryon
+    
+lightning:
+  trainer:
+    strategy: ddp_find_unused_parameters_True
+    precision: 16-mixed
+    max_epochs: 100000
+    sync_batchnorm: True
+    # devices: [0]
+  earlystop_params:
+    monitor: val/loss
+    mode: min
+  monitor_params:
+    logging_interval: step
+
+dataset:
+  height: 512
+  width: 384
+  num_workers: 6
+  batch_size: 16
+  train:
+    target: dataloader.viton.VitonDataset
+    params:
+      size: [512, 384]
+      dataroot_path: data/VITON
+      phase: train
+      category:
+      - upper_body
+      - lower_body
+      - dresses
+      outputlist:
+      - c_name
+      - im_name
+      - image
+      - cloth
+      - inpaint_mask
+      - pose_map
+      - im_head
+      - im_pose
+      - im_cloth
+      - category
+  val:
+    target: dataloader.viton.VitonDataset
+    params:
+      size: [512, 384]
+      dataroot_path: data/VITON
+      phase: val
+      category:
+      - upper_body
+      - lower_body
+      - dresses
+      outputlist:
+      - c_name
+      - im_name
+      - image
+      - cloth
+      - inpaint_mask
+      - pose_map
+      - im_head
+      - im_pose
+      - im_cloth
+      - category
+  test:
+    target: dataloader.viton.VitonDataset
+    params:
+      size: [512, 384]
+      dataroot_path: data/VITON
+      phase: test
+      order: paired
+      category:
+      - upper_body
+      - lower_body
+      - dresses
+      outputlist:
+      - c_name
+      - im_name
+      - image
+      - cloth
+      - inpaint_mask
+      - pose_map
+      - im_head
+      - im_pose
+      - im_cloth
+      - category

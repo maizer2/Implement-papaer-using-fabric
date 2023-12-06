@@ -11,9 +11,7 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "justMyCode": false,
-            "args": ["--model_type", "diffusion",
-                     "--model_name", "diffusers_ControlNet_with_StableDiffusion",
-                     "--dataset", "CIFAR10"]
+            "args": ["--config", "configs/viton/ladi_vton/DressCode/tryon.yaml"]
         }
     ]
 }

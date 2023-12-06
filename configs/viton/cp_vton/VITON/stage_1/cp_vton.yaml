@@ -1,0 +1,93 @@
+model:
+  target: models.viton.Lit_viton
+  params:
+    lr: 2.36e-6
+    sampling_step: 5
+    num_sampling: 20
+    model_name: cp_vton
+    optim_name: Adam
+    model_args:
+      GMM_model_path: checkpoints/viton/cp_vton/stage_1/GMM.ckpt
+      stage: stage_1
+      GMM_config:
+        target: models.VITON.cp-vton.networks.GMM
+        params:
+          grid_size: 5
+          fine_height: 256
+          fine_width: 192
+          p_channels: 22
+          c_channels: 3
+      ploss_config:
+        target: models.VITON.cp-vton.networks.VGGLoss
+
+
+logger:
+  logger_path: checkpoints/viton/cp_vton/stage_1
+    
+lightning:
+  trainer:
+    strategy: ddp_find_unused_parameters_True
+    precision: 16-mixed
+    max_epochs: 100000
+    sync_batchnorm: True
+    # devices: [0]
+  earlystop_params:
+    monitor: val/loss
+    mode: min
+  monitor_params:
+    logging_interval: step
+
+dataset:
+  height: 256
+  width: 192
+  num_workers: 6
+  batch_size: 16
+  train:
+    target: dataloader.viton.VitonDataset
+    params:
+      size: [256, 192]
+      dataroot_path: data/VITON
+      phase: train
+      outputlist:
+      - c_name
+      - im_name
+      - image
+      - cloth
+      - inpaint_mask
+      - pose_map
+      - im_head
+      - im_pose
+      - im_cloth
+  val:
+    target: dataloader.viton.VitonDataset
+    params:
+      size: [256, 192]
+      dataroot_path: data/VITON
+      phase: val
+      outputlist:
+      - c_name
+      - im_name
+      - image
+      - cloth
+      - inpaint_mask
+      - pose_map
+      - im_head
+      - im_pose
+      - im_cloth
+  test:
+    target: dataloader.viton.VitonDataset
+    params:
+      size: [256, 192]
+      dataroot_path: data/VITON
+      phase: test
+      order: paired
+      outputlist:
+      - c_name
+      - im_name
+      - image
+      - cloth
+      - inpaint_mask
+      - pose_map
+      - im_head
+      - im_pose
+      - im_cloth

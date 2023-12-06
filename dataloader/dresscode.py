@@ -436,8 +436,20 @@ class DressCodeDataset(data.Dataset):
         return len(self.c_names)
 
 if __name__ == "__main__":
+
+    transform = transforms.Compose([transforms.ToTensor(),
+                                    transforms.Normalize((0.5, ), (0.5, )),
+                                    transforms.Resize((512, 384), antialias=True)])
+        
+    outputs = ['c_name', 'im_name', 'cloth', 'image', 'im_cloth', 'shape', 'im_head', 'im_pose',
+                            'pose_map', 'parse_array', 'skeleton',
+                            'im_mask', 'inpaint_mask', 'parse_mask_total', 'category', 'hands',
+                            'parse_head_2']
+    
     dataset = DressCodeDataset(dataroot_path="data/DressCode",
                                phase="train",
                                category=['upper_body'],
+                               outputlist=outputs,
+                               transform=transform
                                )
     dataset.__getitem__(0)

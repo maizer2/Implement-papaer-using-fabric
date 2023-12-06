@@ -101,7 +101,7 @@ class VitonDataset(data.Dataset):
                                            'warped_cloth', 
                                            'clip_cloth_features'
                                            ),
-                 size: Tuple[int, int] = (512, 384),
+                 size: Tuple[int, int] = (256, 192),
                  ):
 
         super().__init__()
@@ -410,6 +410,10 @@ if __name__ == "__main__":
                             'im_mask', 'inpaint_mask', 'parse_mask_total',
                             'category']
     
-    dataset = VitonDataset(dataroot_path="data/VITON",
-                           phase="train", outputlist=outputlist)
+    transform = transforms.Compose([transforms.ToTensor(),
+                                    transforms.Normalize((0.5, ), (0.5, )),
+                                    transforms.Resize((256, 192), antialias=True)])
+        
+    dataset = VitonDataset(dataroot_path="/Driver/workspace/Implement-papaer-using-lightning/data/VITON",
+                           phase="train", outputlist=outputlist, transform=transform, size=(256,192))
     dataset.__getitem__(0)
