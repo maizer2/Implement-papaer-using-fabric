@@ -187,7 +187,8 @@ class ladi_vton(nn.Module):
                  img2img = False,
                  cloth_warpping = False,
                  cloth_refinement = False,
-                 use_emasc = False):
+                 use_emasc = False,
+                 model_path = None):
         super().__init__()
         
         self.stage = stage
@@ -198,7 +199,8 @@ class ladi_vton(nn.Module):
         self.cloth_warpping = cloth_warpping
         self.cloth_refinement = cloth_refinement
         self.use_emasc = use_emasc
-                
+        self.model_path = model_path
+        
         self.criterion = nn.MSELoss()
         
         self.tps, self.refinement = torch.hub.load(repo_or_dir='miccunifi/ladi-vton', source='github', model='warping_module', 
@@ -216,12 +218,18 @@ class ladi_vton(nn.Module):
         if stage == "emasc":
             self.emasc = instantiate_from_config(emasc_config)
             model_eval([self.emasc])
+            
+            if os.path.exists(model_path):
+                self.emasc.load_state_dict(torch.load(model_path))
         elif stage == "inversion_adapter":
             self.vision_encoder = CLIPVisionModelWithProjection.from_pretrained("laion/CLIP-ViT-H-14-laion2B-s32B-b79K")
             self.processor = AutoProcessor.from_pretrained("laion/CLIP-ViT-H-14-laion2B-s32B-b79K")
             self.inversion_adapter = InversionAdapter(**inversion_adapter_config,
                                                      clip_config=self.vision_encoder.config)
             model_eval([self.vision_encoder, self.inversion_adapter])
+            
+            if os.path.exists(model_path):
+                self.inversion_adapter.load_state_dict(torch.load(model_path))
         else:
             self.vision_encoder = CLIPVisionModelWithProjection.from_pretrained("laion/CLIP-ViT-H-14-laion2B-s32B-b79K")
             self.processor = AutoProcessor.from_pretrained("laion/CLIP-ViT-H-14-laion2B-s32B-b79K")
@@ -230,6 +238,9 @@ class ladi_vton(nn.Module):
                                                      clip_config=self.vision_encoder.config,
                                                      output_dim=self.text_encoder.config.hidden_size * inversion_adapter_config["num_vstar"])
             model_eval([self.vision_encoder, self.emasc, self.inversion_adapter])
+            
+            if os.path.exists(model_path):
+                self.unet.load_state_dict(torch.load(model_path))
            
     def train_tps(self, batch):
         loss = None
@@ -386,6 +397,9 @@ class ladi_vton(nn.Module):
                 ("inpaint_mask", m),
                 ("skeleton", batch["skeleton"]),
                 ("result", pred)]
+    
+    def save_model(self):
+        torch.save(self.unet.state_dict(), self.model_path)
         
     def warping_cloth(self, batch):
         cloth = batch["cloth"]
@@ -517,7 +531,9 @@ class Lit_viton(pl.LightningModule):
         self.logging_output(batch, "train")
         
         return loss
-            
+    
+    def on_train_epoch_end(self):
+        self.model.save_model()
     def validation_step(self, batch, batch_idx):
         loss = self.model.get_loss(batch)
         
