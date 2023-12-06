@@ -28,7 +28,7 @@ model:
 
 
 logger:
-  logger_path: checkpoints/viton/ladi_vton/tryon
+  logger_path: checkpoints/viton/ladi_vton/DressCode/tryon
     
 lightning:
   trainer:
