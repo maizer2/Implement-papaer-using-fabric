@@ -353,8 +353,6 @@ class ladi_vton(nn.Module):
         elif self.stage == "inversion_adapter":
             loss = self.train_inversion_adapter(batch)
         else:
-            self.inference(batch, 20)
-            exit()
             loss = self.train_tryon(batch)
             
         return loss
@@ -399,7 +397,8 @@ class ladi_vton(nn.Module):
                 ("result", pred)]
     
     def save_model(self):
-        torch.save(self.unet.state_dict(), self.model_path)
+        if self.stage == "tryon":
+            torch.save(self.unet.state_dict(), self.model_path)
         
     def warping_cloth(self, batch):
         cloth = batch["cloth"]
@@ -534,6 +533,7 @@ class Lit_viton(pl.LightningModule):
     
     def on_train_epoch_end(self):
         self.model.save_model()
+        
     def validation_step(self, batch, batch_idx):
         loss = self.model.get_loss(batch)
         
