@@ -185,7 +185,8 @@ class ladi_vton(nn.Module):
                  in_channels: int = 31,
                  num_inference_steps = 50,
                  cloth_warpping = False,
-                 cloth_refinement = False):
+                 cloth_refinement = False,
+                 use_emasc = False):
         super().__init__()
         
         self.stage = stage
@@ -194,6 +195,7 @@ class ladi_vton(nn.Module):
         self.num_inference_steps = num_inference_steps
         self.cloth_warpping = cloth_warpping
         self.cloth_refinement = cloth_refinement
+        self.use_emasc = use_emasc
                 
         self.criterion = nn.MSELoss()
         
@@ -210,6 +212,7 @@ class ladi_vton(nn.Module):
         unet_init(self.unet, in_channels)
         
         if stage == "emasc":
+            self.emasc_int_layers = [1, 2, 3, 4, 5]
             self.emasc = instantiate_from_config(emasc_config)
             model_eval([self.emasc])
         elif stage == "inversion_adapter":
@@ -219,6 +222,7 @@ class ladi_vton(nn.Module):
                                                      clip_config=self.vision_encoder.config)
             model_eval([self.vision_encoder, self.inversion_adapter])
         else:
+            self.emasc_int_layers = [1, 2, 3, 4, 5]
             self.vision_encoder = CLIPVisionModelWithProjection.from_pretrained("laion/CLIP-ViT-H-14-laion2B-s32B-b79K")
             self.processor = AutoProcessor.from_pretrained("laion/CLIP-ViT-H-14-laion2B-s32B-b79K")
             self.emasc = instantiate_from_config(emasc_config)
@@ -243,8 +247,8 @@ class ladi_vton(nn.Module):
         return loss
     
     def train_tryon(self, batch):
-        latent, unet_input, noise, encoder_hidden_states = self.get_tryon_input(batch)
-        # denoising을 전체적으로? 아님 z만?
+        latent, unet_input, noise, encoder_hidden_states, _ = self.get_tryon_input(batch)
+        # denoising을 전체적으로? 아님 z만? -> z만
         unet_output = self(latent, unet_input, noise, encoder_hidden_states)
         
         loss = self.criterion(noise, unet_output)
@@ -265,7 +269,7 @@ class ladi_vton(nn.Module):
     def reverse_diffusion_process(self, zT = None, shape = None, unet_input = None, prompt_embeds = None) -> torch.from_numpy:
         if zT is None:
             zT = torch.randn(shape, dtype=torch.float32).cuda()
-        
+                
         if unet_input is None:
             unet_shape = (shape[0], self.in_channels - zT.size(1), shape[2], shape[3])
             unet_input = torch.randn(unet_shape, dtype=zT.dtype).cuda()
@@ -346,13 +350,14 @@ class ladi_vton(nn.Module):
         p = nn.functional.interpolate(p, size=(p.shape[2] // 8, p.shape[3] // 8), mode="bilinear")
         latent = self.vae.encode(I)[0].latent_dist.sample() * self.vae.config.scaling_factor
         C_W = self.vae.encode(C_W)[0].latent_dist.sample() * self.vae.config.scaling_factor
-        I_M = self.vae.encode(I_M)[0].latent_dist.sample() * self.vae.config.scaling_factor
+        I_M, I_M_intermediate_features = self.vae.encode(I_M)
+        I_M = I_M.latent_dist.sample() * self.vae.config.scaling_factor
         
         unet_input = torch.cat([m, p, C_W, I_M], 1)
         noise = torch.randn(latent.shape, dtype=torch.float32).cuda()
         encoder_hidden_states = self.get_encoder_hidden_states(C, batch["category"])
         
-        return latent, unet_input, noise, encoder_hidden_states
+        return latent, unet_input, noise, encoder_hidden_states, I_M_intermediate_features
     
     def get_input(self, batch, num_sampling = None):
         I = batch["image"]
@@ -384,7 +389,7 @@ class ladi_vton(nn.Module):
         return loss
     
     def tryon_inference(self, batch, num_sampling, img2img):
-        latent, unet_input, noise, encoder_hidden_states = self.get_tryon_input(batch, num_sampling)
+        latent, unet_input, noise, encoder_hidden_states, I_M_intermediate_features = self.get_tryon_input(batch, num_sampling)
         
         self.unet.eval()
         with torch.no_grad():
@@ -393,9 +398,11 @@ class ladi_vton(nn.Module):
             else:
                 zT = None
             
-            pred_z0 = self.reverse_diffusion_process(zT, zT.shape, unet_input, encoder_hidden_states)
-            pred_x0 = self.vae.decode(pred_z0).sample
-        
+            pred_z0 = self.reverse_diffusion_process(zT, latent.shape, unet_input, encoder_hidden_states)
+            if self.use_emasc:
+                pred_x0 = self.vae.decode(pred_z0, I_M_intermediate_features, self.emasc_int_layers).sample
+            else:
+                pred_x0 = self.vae.decode(pred_z0).sample
         self.unet.train()
         
         return pred_x0
@@ -504,35 +511,36 @@ class Lit_viton(pl.LightningModule):
             x0, x0_hat = self.predict(batch)
      
     def predict(self, batch, model_save = False):
-        x0, x0_hat = self.model.inference(batch, self.num_sampling, model_save)
+        outputs: tuple = self.model.inference(batch, self.num_sampling, model_save)
         
-        return x0, x0_hat
+        return outputs
         
     def logging_loss(self, loss, prefix):
         self.log(f'{prefix}/loss', loss, prog_bar=True, sync_dist=True)
         
-    def get_grid(self, inputs, return_pil=False):        
-        if not isinstance(inputs, list):
-            inputs = [inputs]
+    def get_grid(self, inputs: tuple or list, return_pil=False):
+        if not isinstance(inputs[0], str) or not isinstance(inputs[1], torch.Tensor):
+            raise Exception("Wrong inputs type.")
         
         outputs = []
-        for data in inputs:
-            data = (data / 2 + 0.5).clamp(0, 1)
+        for input in inputs:
+            grid_name, image = input
+            image = (image/ 2 + 0.5).clamp(0, 1)
             
             if return_pil:
-                outputs.append(self.numpy_to_pil(make_grid(data)))
+                outputs.append((grid_name, self.numpy_to_pil(make_grid(image))))
             else:
-                outputs.append(make_grid(data))
+                outputs.append((grid_name, make_grid(image)))
         
         return outputs
     
     def sampling(self, batch, prefix="train", model_save=False):
-        x0, x0_hat = self.predict(batch, model_save)
+        outputs = self.predict(batch, model_save)
         
-        x0_grid, pred_grid = self.get_grid([x0, x0_hat])
+        output_grids = self.get_grid(outputs)
         
-        self.logger.experiment.add_image(f'{prefix}/x0', x0_grid, self.current_epoch)
-        self.logger.experiment.add_image(f'{prefix}/x0_hat', pred_grid, self.current_epoch)
+        for output_grid in output_grids:
+            self.logger.experiment.add_image(f'{prefix}/{output_grid[0]}', output_grid[1], self.current_epoch)
                 
     def logging_output(self, batch, prefix="train"):
         if self.global_rank == 0:
