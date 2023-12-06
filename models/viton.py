@@ -404,7 +404,7 @@ class ladi_vton(nn.Module):
         if self.stage == "tryon":
             pred = self.tryon_inference(batch, num_sampling, img2img)
             
-        return pred
+        return batch["image"], pred
     
     def get_word_embedding(self, cloth):
         # Get the visual features of the in-shop cloths

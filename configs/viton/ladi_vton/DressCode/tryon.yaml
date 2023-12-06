@@ -38,7 +38,7 @@ logger:
     
 lightning:
   trainer:
-    strategy: ddp_find_unused_parameters_True
+    strategy: ddp_find_unused_parameters_False
     # precision: 16-mixed
     max_epochs: 100000
     sync_batchnorm: True
