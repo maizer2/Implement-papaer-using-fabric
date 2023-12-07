@@ -315,7 +315,7 @@ class AutoencoderKL(ModelMixin, ConfigMixin):
                 Whether or not to return a [`DecoderOutput`] instead of a plain tuple.
         """
         x = sample
-        posterior = self.encode(x).latent_dist
+        posterior = self.encode(x)[0].latent_dist
         if sample_posterior:
             z = posterior.sample(generator=generator)
         else:

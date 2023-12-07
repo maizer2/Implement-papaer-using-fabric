@@ -21,10 +21,12 @@ from transformers import CLIPTextModel, CLIPTokenizer, CLIPFeatureExtractor
 
 class DDPM(nn.Module):
     def __init__(self,
+                 optim_name: str,
                  unet_config: str,
                  num_train_timesteps = 1_000,
                  num_inference_steps = 1_000):
         super().__init__()
+        self.optimizer = getattr(importlib.import_module("torch.optim"), optim_name)
         self.criterion = nn.MSELoss()
         
         self.num_train_timesteps = num_train_timesteps
@@ -137,12 +139,26 @@ class DDPM(nn.Module):
         
         return pred_x0
     
+    def configure_optimizers(self, lr):
+        optim = self.optimizer(self(), lr)
+        
+        lambda2 = lambda epoch: 0.95 ** epoch
+        
+        scheduler = LambdaLR(optim, lambda2)
+        
+        optimizers = [optim]
+        schedulers = [scheduler]
+        
+        return optimizers, schedulers
+    
 class diffusers_DDPM(nn.Module):
     def __init__(self,
+                 optim_name: str,
                  unet_config: str,
                  scheduler_config: str,
                  num_inference_steps = 1_000):
         super().__init__()
+        self.optimizer = getattr(importlib.import_module("torch.optim"), optim_name)
         self.criterion = nn.MSELoss()
         
         self.num_inference_steps = num_inference_steps
@@ -219,13 +235,27 @@ class diffusers_DDPM(nn.Module):
         self.unet.train()
         
         return pred_x0
+    
+    def configure_optimizers(self, lr):
+        optim = self.optimizer(self(), lr)
+        
+        lambda2 = lambda epoch: 0.95 ** epoch
+        
+        scheduler = LambdaLR(optim, lambda2)
+        
+        optimizers = [optim]
+        schedulers = [scheduler]
+        
+        return optimizers, schedulers
     
 class diffusers_DDIM(nn.Module):
     def __init__(self,
+                 optim_name: str,
                  unet_config: str,
                  scheduler_config: str,
                  num_inference_steps = 50):
         super().__init__()
+        self.optimizer = getattr(importlib.import_module("torch.optim"), optim_name)
         self.criterion = nn.MSELoss()
         
         self.num_inference_steps = num_inference_steps
@@ -303,12 +333,26 @@ class diffusers_DDIM(nn.Module):
         
         return pred_x0
     
+    def configure_optimizers(self, lr):
+        optim = self.optimizer(self(), lr)
+        
+        lambda2 = lambda epoch: 0.95 ** epoch
+        
+        scheduler = LambdaLR(optim, lambda2)
+        
+        optimizers = [optim]
+        schedulers = [scheduler]
+        
+        return optimizers, schedulers
+    
 class diffusers_PNDM(nn.Module):
     def __init__(self,
+                 optim_name: str,
                  unet_config: str,
                  scheduler_config: str,
                  num_inference_steps = 50):
         super().__init__()
+        self.optimizer = getattr(importlib.import_module("torch.optim"), optim_name)
         self.criterion = nn.MSELoss()
         
         self.num_inference_steps = num_inference_steps
@@ -387,12 +431,26 @@ class diffusers_PNDM(nn.Module):
         
         return pred_x0
       
+    def configure_optimizers(self, lr):
+        optim = self.optimizer(self(), lr)
+        
+        lambda2 = lambda epoch: 0.95 ** epoch
+        
+        scheduler = LambdaLR(optim, lambda2)
+        
+        optimizers = [optim]
+        schedulers = [scheduler]
+        
+        return optimizers, schedulers
+    
 class diffusers_LDM(nn.Module):
     def __init__(self,
+                 optim_name: str,
                  unet_config: str,
                  scheduler_config: str,
                  num_inference_steps = 50):
         super().__init__()
+        self.optimizer = getattr(importlib.import_module("torch.optim"), optim_name)
         self.criterion = nn.MSELoss()
         
         self.num_inference_steps = num_inference_steps
@@ -483,12 +541,26 @@ class diffusers_LDM(nn.Module):
         
         return pred_x0
     
+    def configure_optimizers(self, lr):
+        optim = self.optimizer(self(), lr)
+        
+        lambda2 = lambda epoch: 0.95 ** epoch
+        
+        scheduler = LambdaLR(optim, lambda2)
+        
+        optimizers = [optim]
+        schedulers = [scheduler]
+        
+        return optimizers, schedulers
+    
 class diffusers_StableDiffusion(nn.Module):
     def __init__(self,
+                 optim_name: str,
                  unet_config: str,
                  scheduler_config: str,
                  num_inference_steps = 50):
         super().__init__()
+        self.optimizer = getattr(importlib.import_module("torch.optim"), optim_name)
         self.criterion = nn.MSELoss()
         
         self.num_inference_steps = num_inference_steps
@@ -602,13 +674,27 @@ class diffusers_StableDiffusion(nn.Module):
 
         return encoder_hidden_states
 
+    def configure_optimizers(self, lr):
+        optim = self.optimizer(self(), lr)
+        
+        lambda2 = lambda epoch: 0.95 ** epoch
+        
+        scheduler = LambdaLR(optim, lambda2)
+        
+        optimizers = [optim]
+        schedulers = [scheduler]
+        
+        return optimizers, schedulers
+    
 class diffusers_ControlNet_with_StableDiffusion(nn.Module):
     def __init__(self,
+                 optim_name: str,
                  controlnet_config: str,
                  scheduler_config: str,
                  num_inference_steps: int = 50,
                  controlnet_conditioning_scale: float = 1.0):
         super().__init__()
+        self.optimizer = getattr(importlib.import_module("torch.optim"), optim_name)
         self.criterion = nn.MSELoss()
         
         self.num_inference_steps = num_inference_steps
@@ -751,12 +837,77 @@ class diffusers_ControlNet_with_StableDiffusion(nn.Module):
         
         return down_block_res_samples, mid_block_res_sample
 
+    def configure_optimizers(self, lr):
+        optim = self.optimizer(self(), lr)
+        
+        lambda2 = lambda epoch: 0.95 ** epoch
+        
+        scheduler = LambdaLR(optim, lambda2)
+        
+        optimizers = [optim]
+        schedulers = [scheduler]
+        
+        return optimizers, schedulers
+    
+class frido(nn.Module):
+    def __init__(self, 
+                 optim_name: str,
+                 stage: str, # msvqgan or frido
+                 vae_config: tuple,
+                 unet_config: str,
+                 scheduler_config: str,
+                 num_inference_steps: int = 50,
+                 cloth_warpping: bool = False,
+                 cloth_refinement: bool = False,
+                 model_path: str = None
+                 ):
+        super().__init__()
+        self.optimizer = getattr(importlib.import_module("torch.optim"), optim_name)
+        self.criterion = nn.MSELoss()
+        
+        self.stage = stage
+        self.num_inference_steps = num_inference_steps
+        self.cloth_warpping = cloth_warpping
+        self.cloth_refinement = cloth_refinement
+        self.model_path = model_path
+        
+        self.vae = instantiate_from_config(vae_config)
+        self.unet = instantiate_from_config(unet_config)
+        self.scheduler = instantiate_from_config(scheduler_config)
+        
+    def forward(self):
+        pass
+    def forward_diffusion_process(self):
+        pass
+    def reverse_diffusion_process(self):
+        pass
+    def get_input(self):
+        pass
+    def get_loss(self):
+        pass
+    def inference(self):
+        pass
+    def get_image_log(self):
+        pass
+    def save_model(self):
+        pass
+    def configure_optimizers(self, lr):
+        optim = self.optimizer(self(), lr)
+        
+        lambda2 = lambda epoch: 0.95 ** epoch
+        
+        scheduler = LambdaLR(optim, lambda2)
+        
+        optimizers = [optim]
+        schedulers = [scheduler]
+        
+        return optimizers, schedulers
+    
 class Lit_diffusion(pl.LightningModule):
     def __init__(self,
                  lr: float,
                  sampling_step: int,
                  num_sampling: int,
-                 optim_name: str,
                  model_name: str,
                  model_args: tuple,
                  img2img: bool = True) -> None:
@@ -765,38 +916,34 @@ class Lit_diffusion(pl.LightningModule):
         self.sampling_step = sampling_step
         self.num_sampling = num_sampling
         self.img2img = img2img
-        self.optimizer = getattr(importlib.import_module("torch.optim"), optim_name)
+        
         self.model = getattr(importlib.import_module(__name__), model_name)(**model_args)
         
     def configure_optimizers(self):
-        optim = self.optimizer(self.model.parameters(), self.lr)
+        optims, schedulers = self.model.configure_optimizers(self.lr)
         
-        lambda1 = lambda epoch: epoch // 30
-        lambda2 = lambda epoch: 0.95 ** epoch
-        
-        # scheduler = LambdaLR(optim, lr_lambda=[lambda1, lambda2])
-        scheduler = LambdaLR(optim, lr_lambda=lambda2)
-        
-        # return [optim], [scheduler]
-        return optim
+        return optims, schedulers
     
     def training_step(self, batch, batch_idx):
-        loss = self.model.get_loss(batch)
+        losses = self.model.get_loss(batch)
         
-        self.logging_loss(loss, "train")
+        self.logging_loss(losses, "train")
         self.logging_output(batch, "train")
         
-        return loss
+        return losses["total"]
     
-    def validation_step(self, batch, batch_idx):
-        loss = self.model.get_loss(batch)
+    def on_train_epoch_end(self):
+        self.model.save_model()
         
-        self.logging_loss(loss, "val")
+    def validation_step(self, batch, batch_idx):
+        losses = self.model.get_loss(batch)
+        
+        self.logging_loss(losses, "val")
     
     def test_step(self, batch, batch_idx):
-        loss = self.model.get_loss(batch)
+        losses = self.model.get_loss(batch)
         
-        self.logging_loss(loss, "test")
+        self.logging_loss(losses, "test")
     
     def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> Any:
         x0_hat = self.predict(batch)
@@ -809,32 +956,28 @@ class Lit_diffusion(pl.LightningModule):
         
         return x0_hat
         
-    def logging_loss(self, loss, prefix):
-        self.log(f'{prefix}/loss', loss, prog_bar=True, sync_dist=True)
-        
-    def get_grid(self, inputs, return_pil=False):        
-        if not isinstance(inputs, list):
-            inputs = [inputs]
-        
-        outputs = []
-        for data in inputs:
-            data = (data / 2 + 0.5).clamp(0, 1)
+    def logging_loss(self, losses: Dict[str, int], prefix):
+        for key in losses:
+            self.log(f'{prefix}/{key}_loss', losses[key], prog_bar=True, sync_dist=True)
+            
+    def get_grid(self, inputs: Dict[str, torch.Tensor], return_pil=False):        
+        for key in inputs:
+            image = (inputs[key]/ 2 + 0.5).clamp(0, 1)
             
             if return_pil:
-                outputs.append(self.numpy_to_pil(make_grid(data)))
+                inputs[key] = self.numpy_to_pil(make_grid(image))
             else:
-                outputs.append(make_grid(data))
+                inputs[key] = make_grid(image)
         
-        return outputs
+        return inputs
     
     def sampling(self, batch, prefix="train"):
-        x0, _ = self.model.get_input(batch)
-        x0_hat = self.predict(batch)
+        outputs = self.model.get_image_log(batch, self.num_sampling)
         
-        x0_grid, pred_grid = self.get_grid([x0, x0_hat])
+        output_grids = self.get_grid(outputs)
         
-        self.logger.experiment.add_image(f'{prefix}/x0', x0_grid, self.current_epoch)
-        self.logger.experiment.add_image(f'{prefix}/x0_hat', pred_grid, self.current_epoch)
+        for key in output_grids:
+            self.logger.experiment.add_image(f'{prefix}/{key}', output_grids[key], self.current_epoch)
                 
     def logging_output(self, batch, prefix="train"):
         if self.global_rank == 0:

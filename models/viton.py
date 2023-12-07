@@ -1,5 +1,5 @@
 import importlib, os
-from typing import Callable, Union, List, Tuple
+from typing import Callable, Union, List, Tuple, Dict
 
 import lightning.pytorch as pl
 
@@ -136,7 +136,7 @@ class cp_vton(nn.Module):
         else:
             raise Exception("Wrong stage.")
         
-        return loss
+        return [("total", loss)]
     
     def inference(self, batch, num_sampling, model_save=False):
         I_t, c_t, c, p = self.get_input(batch, num_sampling)
@@ -179,7 +179,7 @@ class ladi_vton(nn.Module):
     def __init__(self,
                  stage: str, # ["emasc", "inversion_adapter", "tryon"]
                  dataset_name: str, # ["vitonhd", "dresscode"]
-                 scheduler_config: dict,
+                 scheduler_config: dict = None,
                  emasc_config: dict = None,
                  inversion_adapter_config: dict = None,
                  in_channels: int = 31,
@@ -210,7 +210,6 @@ class ladi_vton(nn.Module):
         self.tokenizer = CLIPTokenizer.from_pretrained("stabilityai/stable-diffusion-2-inpainting", subfolder="tokenizer")
         self.vae = AutoencoderKL.from_pretrained("stabilityai/stable-diffusion-2-inpainting", subfolder="vae")
         self.unet = UNet2DConditionModel.from_pretrained("stabilityai/stable-diffusion-2-inpainting", subfolder="unet")
-        self.scheduler = instantiate_from_config(scheduler_config)
 
         model_eval([self.tps, self.refinement, self.vae, self.text_encoder])
         unet_init(self.unet, in_channels)
@@ -226,6 +225,7 @@ class ladi_vton(nn.Module):
             self.processor = AutoProcessor.from_pretrained("laion/CLIP-ViT-H-14-laion2B-s32B-b79K")
             self.inversion_adapter = InversionAdapter(**inversion_adapter_config,
                                                      clip_config=self.vision_encoder.config)
+            self.scheduler = instantiate_from_config(scheduler_config)
             model_eval([self.vision_encoder, self.inversion_adapter])
             
             if os.path.exists(model_path):
@@ -237,6 +237,7 @@ class ladi_vton(nn.Module):
             self.inversion_adapter = InversionAdapter(**inversion_adapter_config,
                                                      clip_config=self.vision_encoder.config,
                                                      output_dim=self.text_encoder.config.hidden_size * inversion_adapter_config["num_vstar"])
+            self.scheduler = instantiate_from_config(scheduler_config)
             model_eval([self.vision_encoder, self.emasc, self.inversion_adapter])
             
             if os.path.exists(model_path):
@@ -245,17 +246,24 @@ class ladi_vton(nn.Module):
     def train_tps(self, batch):
         loss = None
         
-        return loss
+        return [("total", loss)]
     
-    def train_emasc(self, batch):
-        loss = None
+    def train_emasc(self, batch, batch_idx, epoch):
+        image = batch["image"]
+        fake = self.vae(image).sample
         
-        return loss
+        # latents = self.vae.encode(image)[0].latent_dist.sample() * self.vae.config.scaling_factor
+        
+        for idx in range(image.size(0)):
+            grid = make_grid(torch.cat([image[idx].unsqueeze(0), fake[idx].unsqueeze(0)], 0), normalize=True)
+            transforms.ToPILImage()(grid).save(f"test/{epoch}_{batch_idx}.png")
+
+        return torch.tensor(1.0, requires_grad=True).cuda()
     
     def train_inversion_adapter(self, batch):
         loss = None
         
-        return loss
+        return [("total", loss)]
     
     def train_tryon(self, batch):
         latent, unet_input, noise, encoder_hidden_states, _ = self.get_tryon_input(batch)
@@ -264,7 +272,7 @@ class ladi_vton(nn.Module):
         
         loss = self.criterion(noise, unet_output)
         
-        return loss
+        return [("total", loss)]
     
     def forward_diffusion_process(self, z0, noise = None, t = None) -> torch.from_numpy:
         if noise is None:
@@ -347,15 +355,15 @@ class ladi_vton(nn.Module):
                         
         return I, C, C_W, I_M, m, p
     
-    def get_loss(self, batch):
+    def get_loss(self, batch, batch_idx, epoch) -> List[Tuple[str, int]]:
         if self.stage == "emasc":
-            loss = self.train_emasc(batch)
+            losses = self.train_emasc(batch, batch_idx, epoch)
         elif self.stage == "inversion_adapter":
-            loss = self.train_inversion_adapter(batch)
+            losses = self.train_inversion_adapter(batch)
         else:
-            loss = self.train_tryon(batch)
+            losses = self.train_tryon(batch)
             
-        return loss
+        return losses
     
     def tryon_inference(self, batch, num_sampling):
         latent, unet_input, noise, encoder_hidden_states, I_M_intermediate_features = self.get_tryon_input(batch, num_sampling)
@@ -384,17 +392,17 @@ class ladi_vton(nn.Module):
             
         return pred
     
-    def get_image_log(self, batch, num_sampling) -> List[Tuple[str, torch.Tensor]]:
+    def get_image_log(self, batch, num_sampling) -> Dict[str, torch.Tensor]:
         I, C, C_W, I_M, m, _ = self.get_input(batch, num_sampling)
         pred = self.inference(batch, num_sampling)
         
-        return [("image", I), 
-                ("cloth", C), 
-                ("warped_cloth", C_W), 
-                ("image_mask", I_M),
-                ("inpaint_mask", m),
-                ("skeleton", batch["skeleton"]),
-                ("result", pred)]
+        return {"image": I,
+                "cloth": C,
+                "warped_cloth": C_W,
+                "image_mask": I_M,
+                "inpaint_mask": m,
+                "skeleton": batch["skeleton"],
+                "result": pred}
     
     def save_model(self):
         if self.stage == "tryon":
@@ -492,7 +500,7 @@ class ladi_vton(nn.Module):
                                                            word_embeddings, self.inversion_adapter.num_vstar).last_hidden_state
         
         return encoder_hidden_states
-    
+
 class Lit_viton(pl.LightningModule):
     def __init__(self,
                  lr: float,
@@ -524,25 +532,25 @@ class Lit_viton(pl.LightningModule):
         # return optim
     
     def training_step(self, batch, batch_idx):
-        loss = self.model.get_loss(batch)
+        losses = self.model.get_loss(batch, batch_idx, self.current_epoch)
         
-        self.logging_loss(loss, "train")
+        self.logging_loss(losses, "train")
         self.logging_output(batch, "train")
         
-        return loss
+        return losses["total"]
     
     def on_train_epoch_end(self):
         self.model.save_model()
         
     def validation_step(self, batch, batch_idx):
-        loss = self.model.get_loss(batch)
+        losses = self.model.get_loss(batch, batch_idx, self.current_epoch)
         
-        self.logging_loss(loss, "val")
+        self.logging_loss(losses, "val")
     
     def test_step(self, batch, batch_idx):
-        loss = self.model.get_loss(batch)
+        losses = self.model.get_loss(batch, batch_idx, self.current_epoch)
         
-        self.logging_loss(loss, "test")
+        self.logging_loss(losses, "test")
     
     def predict_step(self, batch, batch_idx: int, dataloader_idx: int = 0):
         if self.save_warped_cloth:
@@ -550,32 +558,28 @@ class Lit_viton(pl.LightningModule):
         else:
             x0, x0_hat = self.predict(batch)
              
-    def logging_loss(self, loss, prefix):
-        self.log(f'{prefix}/loss', loss, prog_bar=True, sync_dist=True)
+    def logging_loss(self, losses: Dict[str, int], prefix):
+        for key in losses:
+            self.log(f'{prefix}/{key}_loss', losses[key], prog_bar=True, sync_dist=True)
         
-    def get_grid(self, inputs: tuple or list, return_pil=False):
-        if not isinstance(inputs[0], str) or not isinstance(inputs[1], torch.Tensor):
-            raise Exception("Wrong inputs type.")
-        
-        outputs = []
-        for input in inputs:
-            grid_name, image = input
-            image = (image/ 2 + 0.5).clamp(0, 1)
+    def get_grid(self, inputs: Dict[str, torch.Tensor], return_pil=False):        
+        for key in inputs:
+            image = (inputs[key]/ 2 + 0.5).clamp(0, 1)
             
             if return_pil:
-                outputs.append((grid_name, self.numpy_to_pil(make_grid(image))))
+                inputs[key] = self.numpy_to_pil(make_grid(image))
             else:
-                outputs.append((grid_name, make_grid(image)))
+                inputs[key] = make_grid(image)
         
-        return outputs
+        return inputs
     
     def sampling(self, batch, prefix="train"):
         outputs = self.model.get_image_log(batch, self.num_sampling)
         
         output_grids = self.get_grid(outputs)
         
-        for output_grid in output_grids:
-            self.logger.experiment.add_image(f'{prefix}/{output_grid[0]}', output_grid[1], self.current_epoch)
+        for key in output_grids:
+            self.logger.experiment.add_image(f'{prefix}/{key}', output_grids[key], self.current_epoch)
                 
     def logging_output(self, batch, prefix="train"):
         if self.global_rank == 0:
@@ -583,4 +587,4 @@ class Lit_viton(pl.LightningModule):
                 if self.current_epoch == 0:
                     self.sampling(batch, prefix)
                 elif (self.current_epoch + 1) % self.sampling_step == 0:
-                    self.sampling(batch, prefix, True)                
+                    self.sampling(batch, prefix)                

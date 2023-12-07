@@ -46,7 +46,7 @@ lightning:
     sync_batchnorm: True
     # devices: [0]
   earlystop_params:
-    monitor: val/loss
+    monitor: val/total_loss
     mode: min
   monitor_params:
     logging_interval: step

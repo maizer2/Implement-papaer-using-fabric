@@ -35,7 +35,6 @@ model:
         num_vstar: 16
         model_path: checkpoints/viton/ladi_vton/DressCode/inversion_adapter_dresscode.pth
 
-
 logger:
   logger_path: checkpoints/viton/ladi_vton/DressCode/tryon
     
@@ -47,7 +46,7 @@ lightning:
     sync_batchnorm: True
     # devices: [0]
   earlystop_params:
-    monitor: val/loss
+    monitor: val/total_loss
     mode: min
   monitor_params:
     logging_interval: step
