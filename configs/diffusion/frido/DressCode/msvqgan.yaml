@@ -36,7 +36,7 @@ model:
           attn_resolutions: [32]
           dropout: 0.0
       loss_config:
-      target: taming.modules.losses.vqperceptual.VQLPIPSWithDiscriminator
+      target: models.Diffusion.Frido.taming.modules.losses.vqperceptual.VQLPIPSWithDiscriminator
       params:
         disc_conditional: False
         disc_in_channels: 3

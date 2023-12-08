@@ -173,8 +173,7 @@ class msvqgan(nn.Module):
             I = I[:num_sampling]
             C = C[:num_sampling]
             C_W = C_W[:num_sampling]
-        
-                        
+                
         return I, C, C_W
         
     def get_loss(self, batch, stage) -> Dict[str, int]:
@@ -185,14 +184,16 @@ class msvqgan(nn.Module):
         xrec_aux = None
         if self.use_aux_loss:
             xrec, xrec_aux, qloss, _ = self(x)
+        else:
+            xrec, qloss, _ = self(x)
         
         if stage == "autoencoder":
             # autoencode
-            aeloss, log_dict_ae = self.loss(qloss, x, xrec, 0, self.global_step,
+            total_loss, log_dict_ae = self.criterion(qloss, x, xrec, 0, self.global_step,
                                             last_layer=self.get_last_layer(), split="train", xrec_aux=xrec_aux)
         elif stage == "discriminator":
             # discriminator
-            discloss, log_dict_disc = self.loss(qloss, x, xrec, 1, self.global_step,
+            total_loss, log_dict_disc = self.criterion(qloss, x, xrec, 1, self.global_step,
                                             last_layer=self.get_last_layer(), split="train")
         else:
             xrec, qloss, _ = self(x)

@@ -947,10 +947,7 @@ class Lit_diffusion(pl.LightningModule):
     
     def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> Any:
         x0_hat = self.predict(batch)
-    
-    def on_predict_batch_end(self, outputs, batch, batch_idx, dataloader_idx=0):
-        pass
-        
+            
     def predict(self, batch):
         x0_hat = self.model.inference(batch, self.num_sampling, self.img2img)
         
