@@ -101,6 +101,7 @@ class VitonHDDataset(data.Dataset):
                                            'warped_cloth', 
                                            'clip_cloth_features'
                                            ),
+                 category: Tuple[str] = ('upper_body'),
                  size: Tuple[int, int] = (512, 384),
                  ):
 
@@ -108,7 +109,7 @@ class VitonHDDataset(data.Dataset):
         self.base_width, self.base_height = 768, 1024
         self.dataroot = dataroot_path
         self.phase = phase
-        self.category = ('upper_body')
+        self.category = category
         self.outputlist = outputlist
         self.height = size[0]
         self.width = size[1]

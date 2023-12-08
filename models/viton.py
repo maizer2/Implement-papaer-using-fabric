@@ -17,33 +17,13 @@ from models.VITON.ladi_vton.models.autoencoder_kl import AutoencoderKL
 from models.VITON.ladi_vton.models.inversion_adapter import InversionAdapter
 from models.VITON.ladi_vton.utils.encode_text_word_embedding import encode_text_word_embedding
 
-from run import get_obj_from_str, instantiate_from_config
+from run import instantiate_from_config
 
 def model_eval(models: list):
     for model in models:
         model.requires_grad_(False)
         model.eval()
         
-def unet_init(unet, in_channels):
-    # the posemap has 18 channels, the (encoded) cloth has 4 channels, the standard SD inpaining has 9 channels
-    with torch.no_grad():
-        # Replace the first conv layer of the unet with a new one with the correct number of input channels
-        conv_new = torch.nn.Conv2d(
-            in_channels=in_channels,
-            out_channels=unet.conv_in.out_channels,
-            kernel_size=3,
-            padding=1,
-        )
-
-        torch.nn.init.kaiming_normal_(conv_new.weight)  # Initialize new conv layer
-        conv_new.weight.data = conv_new.weight.data * 0.  # Zero-initialize new conv layer
-
-        conv_new.weight.data[:, :9] = unet.conv_in.weight.data  # Copy weights from old conv layer
-        conv_new.bias.data = unet.conv_in.bias.data  # Copy bias from old conv layer
-
-        unet.conv_in = conv_new  # replace conv layer in unet
-        unet.config['in_channels'] = in_channels  # update config
-      
 class cp_vton(nn.Module):
     '''
     ECCV 2018
@@ -51,6 +31,7 @@ class cp_vton(nn.Module):
     https://arxiv.org/abs/1807.07688
     '''
     def __init__(self, 
+                 optim_name: str,
                  stage: str,
                  GMM_config: dict,
                  ploss_config: dict,
@@ -58,6 +39,7 @@ class cp_vton(nn.Module):
                  GMM_model_path: str = None
                  ):
         super().__init__()
+        self.optimizer = getattr(importlib.import_module("torch.optim"), optim_name)
         self.stage = stage
         self.GMM_model_path = GMM_model_path
         
@@ -174,9 +156,25 @@ class cp_vton(nn.Module):
         for image, image_name in zip(warped_cloth, cloth_name):
             transforms.ToPILImage()(image).save(os.path.join("warped_cloths_paired", image_name))
 
-# class cp_vton_pp(nn.Moduel):
+    def save_model(self):
+        torch.save(self.model.)
+    
+    def configure_optimizers(self, lr):
+        optim = self.optimizer(self.model.parameters(), lr)
+        
+        lambda1 = lambda epoch: epoch // 30
+        lambda2 = lambda epoch: 0.95 ** epoch
+        
+        scheduler = LambdaLR(optim, lr_lambda=lambda2)
+        
+        optimizers = [optim]
+        schedulers = [scheduler]
+        
+        return optimizers, schedulers
+    
 class ladi_vton(nn.Module):
     def __init__(self,
+                 optim_name: str,
                  stage: str, # ["emasc", "inversion_adapter", "tryon"]
                  dataset_name: str, # ["vitonhd", "dresscode"]
                  scheduler_config: dict = None,
@@ -190,6 +188,7 @@ class ladi_vton(nn.Module):
                  use_emasc = False,
                  model_path = None):
         super().__init__()
+        self.optimizer = getattr(importlib.import_module("torch.optim"), optim_name)
         
         self.stage = stage
         self.dataset_name = dataset_name
@@ -212,7 +211,7 @@ class ladi_vton(nn.Module):
         self.unet = UNet2DConditionModel.from_pretrained("stabilityai/stable-diffusion-2-inpainting", subfolder="unet")
 
         model_eval([self.tps, self.refinement, self.vae, self.text_encoder])
-        unet_init(self.unet, in_channels)
+        self.unet_init(in_channels)
         
         if stage == "emasc":
             self.emasc = instantiate_from_config(emasc_config)
@@ -242,7 +241,27 @@ class ladi_vton(nn.Module):
             
             if os.path.exists(model_path):
                 self.unet.load_state_dict(torch.load(model_path))
-           
+     
+    def unet_init(self, in_channels):
+        # the posemap has 18 channels, the (encoded) cloth has 4 channels, the standard SD inpaining has 9 channels
+        with torch.no_grad():
+            # Replace the first conv layer of the unet with a new one with the correct number of input channels
+            conv_new = torch.nn.Conv2d(
+                in_channels=in_channels,
+                out_channels=self.unet.conv_in.out_channels,
+                kernel_size=3,
+                padding=1,
+            )
+
+            torch.nn.init.kaiming_normal_(conv_new.weight)  # Initialize new conv layer
+            conv_new.weight.data = conv_new.weight.data * 0.  # Zero-initialize new conv layer
+
+            conv_new.weight.data[:, :9] = self.unet.conv_in.weight.data  # Copy weights from old conv layer
+            conv_new.bias.data = self.unet.conv_in.bias.data  # Copy bias from old conv layer
+
+            self.unet.conv_in = conv_new  # replace conv layer in unet
+            self.unet.config['in_channels'] = in_channels  # update config
+            
     def train_tps(self, batch):
         loss = None
         
@@ -506,7 +525,6 @@ class Lit_viton(pl.LightningModule):
                  lr: float,
                  sampling_step: int,
                  num_sampling: int,
-                 optim_name: str,
                  model_name: str,
                  model_args: tuple,
                  save_warped_cloth: bool = False) -> None:
@@ -516,20 +534,12 @@ class Lit_viton(pl.LightningModule):
         self.num_sampling = num_sampling
         self.save_warped_cloth = save_warped_cloth
         
-        self.optimizer = getattr(importlib.import_module("torch.optim"), optim_name)
         self.model = getattr(importlib.import_module(__name__), model_name)(**model_args)
         
     def configure_optimizers(self):
-        optim = self.optimizer(self.model.parameters(), self.lr)
+        optims, schedulers = self.model.configure_optimizers(self.lr)
         
-        lambda1 = lambda epoch: epoch // 30
-        lambda2 = lambda epoch: 0.95 ** epoch
-        
-        # scheduler = LambdaLR(optim, lr_lambda=[lambda1, lambda2])
-        scheduler = LambdaLR(optim, lr_lambda=lambda2)
-        
-        return [optim], [scheduler]
-        # return optim
+        return optims, schedulers
     
     def training_step(self, batch, batch_idx):
         losses = self.model.get_loss(batch, batch_idx, self.current_epoch)

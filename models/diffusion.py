@@ -24,13 +24,15 @@ class DDPM(nn.Module):
                  optim_name: str,
                  unet_config: str,
                  num_train_timesteps = 1_000,
-                 num_inference_steps = 1_000):
+                 num_inference_steps = 1_000,
+                 model_path: str = None):
         super().__init__()
         self.optimizer = getattr(importlib.import_module("torch.optim"), optim_name)
         self.criterion = nn.MSELoss()
         
         self.num_train_timesteps = num_train_timesteps
         self.num_inference_steps = num_inference_steps
+        self.model_path = model_path
         
         self.unet = instantiate_from_config(unet_config)
         
@@ -139,6 +141,9 @@ class DDPM(nn.Module):
         
         return pred_x0
     
+    def save_model(self):
+        torch.save(self.unet.state_dict(), self.model_path)
+        
     def configure_optimizers(self, lr):
         optim = self.optimizer(self(), lr)
         
@@ -156,12 +161,14 @@ class diffusers_DDPM(nn.Module):
                  optim_name: str,
                  unet_config: str,
                  scheduler_config: str,
-                 num_inference_steps = 1_000):
+                 num_inference_steps = 1_000,
+                 model_path: str = None):
         super().__init__()
         self.optimizer = getattr(importlib.import_module("torch.optim"), optim_name)
         self.criterion = nn.MSELoss()
         
         self.num_inference_steps = num_inference_steps
+        self.model_path = model_path
         
         self.unet = instantiate_from_config(unet_config)
         self.scheduler = instantiate_from_config(scheduler_config)
@@ -236,6 +243,9 @@ class diffusers_DDPM(nn.Module):
         
         return pred_x0
     
+    def save_model(self):
+        torch.save(self.unet.state_dict(), self.model_path)
+        
     def configure_optimizers(self, lr):
         optim = self.optimizer(self(), lr)
         
@@ -253,12 +263,14 @@ class diffusers_DDIM(nn.Module):
                  optim_name: str,
                  unet_config: str,
                  scheduler_config: str,
-                 num_inference_steps = 50):
+                 num_inference_steps = 50,
+                 model_path: str = None):
         super().__init__()
         self.optimizer = getattr(importlib.import_module("torch.optim"), optim_name)
         self.criterion = nn.MSELoss()
         
         self.num_inference_steps = num_inference_steps
+        self.model_path = model_path
         
         self.unet = instantiate_from_config(unet_config)
         self.scheduler = instantiate_from_config(scheduler_config)
@@ -333,6 +345,9 @@ class diffusers_DDIM(nn.Module):
         
         return pred_x0
     
+    def save_model(self):
+        torch.save(self.unet.state_dict(), self.model_path)
+        
     def configure_optimizers(self, lr):
         optim = self.optimizer(self(), lr)
         
@@ -350,12 +365,14 @@ class diffusers_PNDM(nn.Module):
                  optim_name: str,
                  unet_config: str,
                  scheduler_config: str,
-                 num_inference_steps = 50):
+                 num_inference_steps = 50,
+                 model_path: str = None):
         super().__init__()
         self.optimizer = getattr(importlib.import_module("torch.optim"), optim_name)
         self.criterion = nn.MSELoss()
         
         self.num_inference_steps = num_inference_steps
+        self.model_path = model_path
         
         self.unet = instantiate_from_config(unet_config)
         self.scheduler = instantiate_from_config(scheduler_config)
@@ -431,6 +448,9 @@ class diffusers_PNDM(nn.Module):
         
         return pred_x0
       
+    def save_model(self):
+        torch.save(self.unet.state_dict(), self.model_path)
+        
     def configure_optimizers(self, lr):
         optim = self.optimizer(self(), lr)
         
@@ -448,12 +468,14 @@ class diffusers_LDM(nn.Module):
                  optim_name: str,
                  unet_config: str,
                  scheduler_config: str,
-                 num_inference_steps = 50):
+                 num_inference_steps = 50,
+                 model_path: str = None):
         super().__init__()
         self.optimizer = getattr(importlib.import_module("torch.optim"), optim_name)
         self.criterion = nn.MSELoss()
         
         self.num_inference_steps = num_inference_steps
+        self.model_path = model_path
         
         self.vae = AutoencoderKL.from_pretrained("runwayml/stable-diffusion-v1-5", subfolder="vae")
         self.unet = instantiate_from_config(unet_config)
@@ -541,6 +563,9 @@ class diffusers_LDM(nn.Module):
         
         return pred_x0
     
+    def save_model(self):
+        torch.save(self.unet.state_dict(), self.model_path)
+        
     def configure_optimizers(self, lr):
         optim = self.optimizer(self(), lr)
         
@@ -558,12 +583,14 @@ class diffusers_StableDiffusion(nn.Module):
                  optim_name: str,
                  unet_config: str,
                  scheduler_config: str,
-                 num_inference_steps = 50):
+                 num_inference_steps = 50,
+                 model_path: str = None):
         super().__init__()
         self.optimizer = getattr(importlib.import_module("torch.optim"), optim_name)
         self.criterion = nn.MSELoss()
         
         self.num_inference_steps = num_inference_steps
+        self.model_path = model_path
         
         self.text_encoder = CLIPTextModel.from_pretrained("runwayml/stable-diffusion-v1-5", subfolder="text_encoder")
         self.tokenizer = CLIPTokenizer.from_pretrained("runwayml/stable-diffusion-v1-5", subfolder="tokenizer")
@@ -674,6 +701,9 @@ class diffusers_StableDiffusion(nn.Module):
 
         return encoder_hidden_states
 
+    def save_model(self):
+        torch.save(self.unet.state_dict(), self.model_path)
+        
     def configure_optimizers(self, lr):
         optim = self.optimizer(self(), lr)
         
@@ -692,13 +722,15 @@ class diffusers_ControlNet_with_StableDiffusion(nn.Module):
                  controlnet_config: str,
                  scheduler_config: str,
                  num_inference_steps: int = 50,
-                 controlnet_conditioning_scale: float = 1.0):
+                 controlnet_conditioning_scale: float = 1.0,
+                 model_path: str = None):
         super().__init__()
         self.optimizer = getattr(importlib.import_module("torch.optim"), optim_name)
         self.criterion = nn.MSELoss()
         
         self.num_inference_steps = num_inference_steps
         self.controlnet_conditioning_scale = controlnet_conditioning_scale
+        self.model_path = model_path
         
         self.text_encoder = CLIPTextModel.from_pretrained("runwayml/stable-diffusion-v1-5", subfolder="text_encoder")
         self.tokenizer = CLIPTokenizer.from_pretrained("runwayml/stable-diffusion-v1-5", subfolder="tokenizer")
@@ -837,6 +869,9 @@ class diffusers_ControlNet_with_StableDiffusion(nn.Module):
         
         return down_block_res_samples, mid_block_res_sample
 
+    def save_model(self):
+        torch.save(self.unet.state_dict(), self.model_path)
+        
     def configure_optimizers(self, lr):
         optim = self.optimizer(self(), lr)
         
@@ -890,7 +925,8 @@ class frido(nn.Module):
     def get_image_log(self):
         pass
     def save_model(self):
-        pass
+        torch.save(self.unet.state_dict(), self.model_path)
+        
     def configure_optimizers(self, lr):
         optim = self.optimizer(self(), lr)
         

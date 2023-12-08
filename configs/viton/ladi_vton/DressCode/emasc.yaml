@@ -1,33 +1,15 @@
 model:
-  target: models.viton.Lit_viton
+  target: models.vae.Lit_vae
   params:
     lr: 1e-4
     sampling_step: 5
     num_sampling: 20
-    optim_name: AdamW
-    model_name: ladi_vton
+    model_name: msvqgan
     model_args:
-      stage: emasc
-      dataset_name: dresscode
-      in_channels: 31
-      num_inference_steps: 50
-      cloth_warpping: True
-      cloth_refinement: True
-      use_emasc: True
-      model_path: checkpoints/viton/ladi_vton/DressCode/emasc_dresscode.ckpt
-      emasc_config:
-        target: models.VITON.ladi_vton.models.emasc.EMASC
-        params:
-          in_channels: [128, 128, 128, 256, 512]
-          out_channels: [128, 256, 512, 512, 512]
-          int_layers: [1, 2, 3, 4, 5]
-          kernel_size: 3
-          padding: 1
-          stride: 1
-          type: nonlinear # linear, nonlinear
+      optim_name: AdamW
 
 logger:
-  logger_path: checkpoints/viton/ladi_vton/DressCode/emasc
+  logger_path: checkpoints/diffusion/frido/DressCode/msvqgan
     
 lightning:
   trainer:

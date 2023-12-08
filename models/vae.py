@@ -39,16 +39,20 @@ class msvqgan(nn.Module):
         self.optimizer = getattr(importlib.import_module("torch.optim"), optim_name)
         self.criterion = instantiate_from_config(loss_config)
         
-        self.model_path = model_path
-        
-        self.encoder = instantiate_from_config(encoder_config)
-        self.decoder = instantiate_from_config(decoder_config)
-
         self.fusion = fusion
         self.embed_dim = embed_dim
         self.use_aux_loss = use_aux_loss
         self.unsample_type = unsample_type
-
+        self.model_path = model_path
+        
+        self.encoder = instantiate_from_config(encoder_config)
+        self.decoder = instantiate_from_config(decoder_config)
+        self.ms_quantize = nn.ModuleList()
+        self.ms_quant_conv = nn.ModuleList()
+        self.upsample = nn.ModuleList()
+        self.shared_decoder = nn.ModuleList()
+        self.shared_post_quant_conv = nn.ModuleList()
+        
         assert len(n_embed) == encoder_config['multiscale'], 'multiscale mode. dim of n_embed is incorrect.'
         assert len(n_embed) == len(embed_dim), 'multiscale mode. dim of n_embed is incorrect.'
 
@@ -56,8 +60,6 @@ class msvqgan(nn.Module):
         for i in range(self.encoder.multiscale):
             self.res_list.append(self.encoder.resolution / 2**(self.encoder.num_resolutions - i - 1))
 
-        self.ms_quantize = nn.ModuleList()
-        self.ms_quant_conv = nn.ModuleList()
         if self.fusion == 'concat':
             for i in range(len(n_embed)):
                 self.ms_quantize.append(VectorQuantizer(n_embed[i], embed_dim[i], beta=quant_beta,
@@ -77,9 +79,6 @@ class msvqgan(nn.Module):
         self.post_quant_conv = torch.nn.Conv2d(embed_dim_sum, decoder_config["z_channels"], 1)
 
         # share structure
-        self.upsample = nn.ModuleList()
-        self.shared_decoder = nn.ModuleList()
-        self.shared_post_quant_conv = nn.ModuleList()
         for i in range(len(n_embed)-1):
             self.upsample.append(nn.ConvTranspose2d(
                 embed_dim[0], embed_dim[0], 4, stride=2, padding=1
@@ -207,7 +206,7 @@ class msvqgan(nn.Module):
         pass
     
     def save_model(self):
-        pass
+        torch.save(, self.model_path)
     
     def configure_optimizers(self, lr):
         opt_ae = self.optimizer(list(self.encoder.parameters())+
