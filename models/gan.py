@@ -551,22 +551,22 @@ class Lit_gan(pl.LightningModule):
         # Training Generator
         self.toggle_optimizer(optim_g)
         
+        optim_g.zero_grad()
         loss_g = self.model.get_G_loss(batch, self.current_epoch)
         self.log("loss_g", loss_g, prog_bar=True, sync_dist=True)
         self.manual_backward(loss_g)
         optim_g.step()
-        optim_g.zero_grad()
         
         self.untoggle_optimizer(optim_g)
         
         # Training Discriminator
         self.toggle_optimizer(optim_d)
         
+        optim_d.zero_grad()
         loss_d = self.model.get_D_loss(batch, self.current_epoch)
         self.log("loss_d", loss_d, prog_bar=True, sync_dist=True)
         self.manual_backward(loss_d)
         optim_d.step()
-        optim_d.zero_grad()
         
         self.untoggle_optimizer(optim_d)
     

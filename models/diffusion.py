@@ -1,5 +1,5 @@
 import importlib, os
-from typing import Any, Optional, Union
+from typing import Any, Optional, Union, Dict, 
 
 import lightning.pytorch as pl
 
@@ -41,6 +41,9 @@ class DDPM(nn.Module):
         self.alpha_bar = torch.cumprod(self.alpha, dim=0)
         self.sigma2 = self.beta
     
+        if model_path is not None:
+            self.unet.load_state_dict(torch.load(model_path))
+            
     def class_instance_to_cuda(self):
         self.beta = self.beta.cuda()
         self.alpha = self.alpha.cuda()
@@ -173,6 +176,9 @@ class diffusers_DDPM(nn.Module):
         self.unet = instantiate_from_config(unet_config)
         self.scheduler = instantiate_from_config(scheduler_config)
 
+        if model_path is not None:
+            self.unet.load_state_dict(torch.load(model_path))
+            
     def forward_diffusion_process(self, x0, noise = None, t = None) -> torch.FloatTensor:
         if noise is None:
             noise = torch.randn(x0.shape, dtype=x0.dtype, device=x0.device)
@@ -275,6 +281,9 @@ class diffusers_DDIM(nn.Module):
         self.unet = instantiate_from_config(unet_config)
         self.scheduler = instantiate_from_config(scheduler_config)
 
+        if model_path is not None:
+            self.unet.load_state_dict(torch.load(model_path))
+            
     def forward_diffusion_process(self, x0, noise = None, t = None) -> torch.FloatTensor:
         if noise is None:
             noise = torch.randn(x0.shape, dtype=x0.dtype, device=x0.device)
@@ -377,6 +386,9 @@ class diffusers_PNDM(nn.Module):
         self.unet = instantiate_from_config(unet_config)
         self.scheduler = instantiate_from_config(scheduler_config)
 
+        if model_path is not None:
+            self.unet.load_state_dict(torch.load(model_path))
+            
     def forward_diffusion_process(self, x0, noise = None, t = None) -> torch.FloatTensor:
         if noise is None:
             noise = torch.randn(x0.shape, dtype=x0.dtype, device=x0.device)
@@ -484,6 +496,9 @@ class diffusers_LDM(nn.Module):
 
         self.model_eval([self.vae])
         
+        if model_path is not None:
+            self.unet.load_state_dict(torch.load(model_path))
+            
     def model_eval(self, models: list):
         for model in models:
             model.requires_grad_(False)
@@ -600,6 +615,9 @@ class diffusers_StableDiffusion(nn.Module):
 
         self.model_eval([self.vae, self.text_encoder])
         
+        if model_path is not None:
+            self.unet.load_state_dict(torch.load(model_path))
+            
     def model_eval(self, models: list):
         for model in models:
             model.requires_grad_(False)
@@ -743,6 +761,9 @@ class diffusers_ControlNet_with_StableDiffusion(nn.Module):
         
         self.model_eval([self.vae, self.text_encoder, self.unet])
         
+        if model_path is not None:
+            self.unet.load_state_dict(torch.load(model_path))
+            
     def model_eval(self, models: list):
         for model in models:
             model.requires_grad_(False)
@@ -887,7 +908,6 @@ class diffusers_ControlNet_with_StableDiffusion(nn.Module):
 class frido(nn.Module):
     def __init__(self, 
                  optim_name: str,
-                 stage: str, # msvqgan or frido
                  vae_config: tuple,
                  unet_config: str,
                  scheduler_config: str,
@@ -900,7 +920,6 @@ class frido(nn.Module):
         self.optimizer = getattr(importlib.import_module("torch.optim"), optim_name)
         self.criterion = nn.MSELoss()
         
-        self.stage = stage
         self.num_inference_steps = num_inference_steps
         self.cloth_warpping = cloth_warpping
         self.cloth_refinement = cloth_refinement
@@ -910,6 +929,9 @@ class frido(nn.Module):
         self.unet = instantiate_from_config(unet_config)
         self.scheduler = instantiate_from_config(scheduler_config)
         
+        if model_path is not None:
+            self.unet.load_state_dict(torch.load(model_path))
+            
     def forward(self):
         pass
     def forward_diffusion_process(self):
@@ -938,84 +960,3 @@ class frido(nn.Module):
         schedulers = [scheduler]
         
         return optimizers, schedulers
-    
-class Lit_diffusion(pl.LightningModule):
-    def __init__(self,
-                 lr: float,
-                 sampling_step: int,
-                 num_sampling: int,
-                 model_name: str,
-                 model_args: tuple,
-                 img2img: bool = True) -> None:
-        super().__init__()
-        self.lr = lr
-        self.sampling_step = sampling_step
-        self.num_sampling = num_sampling
-        self.img2img = img2img
-        
-        self.model = getattr(importlib.import_module(__name__), model_name)(**model_args)
-        
-    def configure_optimizers(self):
-        optims, schedulers = self.model.configure_optimizers(self.lr)
-        
-        return optims, schedulers
-    
-    def training_step(self, batch, batch_idx):
-        losses = self.model.get_loss(batch)
-        
-        self.logging_loss(losses, "train")
-        self.logging_output(batch, "train")
-        
-        return losses["total"]
-    
-    def on_train_epoch_end(self):
-        self.model.save_model()
-        
-    def validation_step(self, batch, batch_idx):
-        losses = self.model.get_loss(batch)
-        
-        self.logging_loss(losses, "val")
-    
-    def test_step(self, batch, batch_idx):
-        losses = self.model.get_loss(batch)
-        
-        self.logging_loss(losses, "test")
-    
-    def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> Any:
-        x0_hat = self.predict(batch)
-            
-    def predict(self, batch):
-        x0_hat = self.model.inference(batch, self.num_sampling, self.img2img)
-        
-        return x0_hat
-        
-    def logging_loss(self, losses: Dict[str, int], prefix):
-        for key in losses:
-            self.log(f'{prefix}/{key}_loss', losses[key], prog_bar=True, sync_dist=True)
-            
-    def get_grid(self, inputs: Dict[str, torch.Tensor], return_pil=False):        
-        for key in inputs:
-            image = (inputs[key]/ 2 + 0.5).clamp(0, 1)
-            
-            if return_pil:
-                inputs[key] = self.numpy_to_pil(make_grid(image))
-            else:
-                inputs[key] = make_grid(image)
-        
-        return inputs
-    
-    def sampling(self, batch, prefix="train"):
-        outputs = self.model.get_image_log(batch, self.num_sampling)
-        
-        output_grids = self.get_grid(outputs)
-        
-        for key in output_grids:
-            self.logger.experiment.add_image(f'{prefix}/{key}', output_grids[key], self.current_epoch)
-                
-    def logging_output(self, batch, prefix="train"):
-        if self.global_rank == 0:
-            if self.trainer.is_last_batch:
-                if self.current_epoch == 0:
-                    self.sampling(batch, prefix)
-                elif (self.current_epoch + 1) % self.sampling_step == 0:
-                    self.sampling(batch, prefix)                

@@ -5,8 +5,8 @@ import pytorch_lightning as pl
 from tqdm import tqdm
 
 from main import instantiate_from_config
-from taming.modules.util import SOSProvider
-from taming.modules.losses.soft_cross_entropy import SoftCrossEntropy
+from models.Diffusion.Frido.taming.modules.util import SOSProvider
+from models.Diffusion.Frido.taming.modules.losses.soft_cross_entropy import SoftCrossEntropy
 
 def disabled_train(self, mode=True):
     """Overwrite model.train with this function to make sure train/eval mode

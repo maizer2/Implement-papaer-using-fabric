@@ -1,52 +1,55 @@
 model:
-  target: models.vae.Lit_vae
+  target: models.vae.Lit_msvqgan
   params:
     lr: 4.5e-6
     sampling_step: 5
     num_sampling: 20
-    optim_name: AdamW
-    model_name: msvqgan
-    model_args:
-      model_path: checkpoints/diffusion/frido/msvqgan
-      encoder_config:
-        target: models.Diffusion.Frido.taming.modules.diffusionmodules.model.MSEncoder
-        params:
-          multiscale: 2
-          double_z: False
-          z_channels: [4, 4]
-          resolution: 256
-          in_channels: 3
-          out_ch: 3
-          ch: 128
-          ch_mult: [ 1,1,2,2,4 ]  # num_down = len(ch_mult)-1
-          num_res_blocks: 2
-          attn_resolutions: [32]
-          dropout: 0.0
-      decoder_config:
-        target: models.Diffusion.Frido.taming.modules.diffusionmodules.model.Decoder
-        params:
-          double_z: False
-          z_channels: 8
-          resolution: 256
-          in_channels: 3
-          out_ch: 3
-          ch: 128
-          ch_mult: [ 1,1,2,4 ]  # num_down = len(ch_mult)-1
-          num_res_blocks: 2
-          attn_resolutions: [32]
-          dropout: 0.0
-      loss_config:
-      target: models.Diffusion.Frido.taming.modules.losses.vqperceptual.VQLPIPSWithDiscriminator
+    model_config:
+      target: models.vae.msvqgan
       params:
-        disc_conditional: False
-        disc_in_channels: 3
-        disc_num_layers: 2
-        disc_start: 30001
-        disc_weight: 0.8
-        codebook_weight: 1.0
+        optim_target: torch.optim.adam.Adam
+        model_path: checkpoints/diffusion/frido/msvqgan/DressCode/msvqgan_DressCode.ckpt
+        embed_dim: [4, 4]
+        n_embed: [8192, 8192]
+        encoder_config:
+          target: models.Diffusion.Frido.taming.modules.diffusionmodules.model.MSEncoder
+          params:
+            multiscale: 2
+            double_z: False
+            z_channels: [4, 4]
+            resolution: 256
+            in_channels: 3
+            out_ch: 3
+            ch: 128
+            ch_mult: [ 1,1,2,2,4 ]  # num_down = len(ch_mult)-1
+            num_res_blocks: 2
+            attn_resolutions: [32]
+            dropout: 0.0
+        decoder_config:
+          target: models.Diffusion.Frido.taming.modules.diffusionmodules.model.Decoder
+          params:
+            double_z: False
+            z_channels: 8
+            resolution: 256
+            in_channels: 3
+            out_ch: 3
+            ch: 128
+            ch_mult: [ 1,1,2,4 ]  # num_down = len(ch_mult)-1
+            num_res_blocks: 2
+            attn_resolutions: [32]
+            dropout: 0.0
+        criterion_config:
+          target: models.Diffusion.Frido.taming.modules.losses.vqperceptual.VQLPIPSWithDiscriminator
+          params:
+            disc_conditional: False
+            disc_in_channels: 3
+            disc_num_layers: 2
+            disc_start: 30001
+            disc_weight: 0.8
+            codebook_weight: 1.0
 
 logger:
-  logger_path: checkpoints/diffusion/frido/DressCode/tryon
+  logger_path: checkpoints/diffusion/frido/msvqgan/DressCode
     
 lightning:
   trainer:
@@ -65,7 +68,7 @@ dataset:
   height: &height 512
   width: &width 384
   num_workers: 6
-  batch_size: 8
+  batch_size: 2
   train:
     target: &data_target dataloader.dresscode.DressCodeDataset
     params:

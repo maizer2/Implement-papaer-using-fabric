@@ -8,10 +8,10 @@ import pytorch_lightning as pl
 
 from frido.util import instantiate_from_config_main as instantiate_from_config
 
-from taming.modules.diffusionmodules.model import Encoder, Decoder, MSEncoder
-from taming.modules.vqvae.quantize import VectorQuantizer2 as VectorQuantizer
-from taming.modules.vqvae.quantize import GumbelQuantize
-from taming.modules.vqvae.quantize import EMAVectorQuantizer
+from models.Diffusion.Frido.taming.modules.diffusionmodules.model import Encoder, Decoder, MSEncoder
+from models.Diffusion.Frido.taming.modules.vqvae.quantize import VectorQuantizer2 as VectorQuantizer
+from models.Diffusion.Frido.taming.modules.vqvae.quantize import GumbelQuantize
+from models.Diffusion.Frido.taming.modules.vqvae.quantize import EMAVectorQuantizer
 
 class MSFPNVQModel(pl.LightningModule):
     def __init__(self,

@@ -10,8 +10,6 @@ import torch
 from torch.utils import data
 from torchvision import transforms
 
-from torchvision.datasets import MNIST
-
 torch.set_float32_matmul_precision('medium')
 
 def instantiate_from_config(config):
@@ -87,7 +85,7 @@ def get_dataloader(data_config, transform=None, all=False):
                             
     
     return train_loader, val_loader, test_loader
-    
+
 if __name__ == "__main__":
     opt = get_opt()
     

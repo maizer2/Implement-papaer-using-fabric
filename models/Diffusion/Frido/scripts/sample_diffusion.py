@@ -18,7 +18,7 @@ from frido.models.diffusion.ddim import DDIMSampler
 from frido.models.diffusion.plms import PLMSSampler
 from frido.util import instantiate_from_config_main as instantiate_from_config
 
-from taming.data.utils import custom_collate
+from models.Diffusion.Frido.taming.data.utils import custom_collate
 
 torch.manual_seed(23)
 np.random.seed(23)

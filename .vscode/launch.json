@@ -11,7 +11,7 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "justMyCode": false,
-            "args": ["--config", "configs/viton/ladi_vton/VITON/emasc.yaml"]
+            "args": ["--config", "configs/diffusion/frido/DressCode/msvqgan.yaml"]
         }
     ]
 }

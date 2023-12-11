@@ -4,8 +4,8 @@ import torch.nn.functional as F
 import cv2
 import torchvision
 
-from taming.modules.losses.lpips import LPIPS
-from taming.modules.discriminator.model import NLayerDiscriminator, weights_init
+from models.Diffusion.Frido.taming.modules.losses.lpips import LPIPS
+from models.Diffusion.Frido.taming.modules.discriminator.model import NLayerDiscriminator, weights_init
 
 
 class DummyLoss(nn.Module):
@@ -78,7 +78,7 @@ class VQLPIPSWithDiscriminator(nn.Module):
         return d_weight
 
     def forward(self, codebook_loss, inputs, reconstructions, optimizer_idx,
-                global_step, last_layer=None, cond=None, split="train", xrec_aux=None):
+                global_step, last_layer=None, cond=None, xrec_aux=None):
         
         aux_downscale = self.aux_downscale
 
@@ -119,17 +119,17 @@ class VQLPIPSWithDiscriminator(nn.Module):
             disc_factor = adopt_weight(self.disc_factor, global_step, threshold=self.discriminator_iter_start)
             loss = nll_loss + d_weight * disc_factor * g_loss + self.codebook_weight * codebook_loss.mean()
 
-            log = {"{}/total_loss".format(split): loss.clone().detach().mean(),
-                   "{}/quant_loss".format(split): codebook_loss.detach().mean(),
-                   "{}/nll_loss".format(split): nll_loss.detach().mean(),
-                   "{}/rec_loss".format(split): rec_loss.detach().mean(),
-                   "{}/p_loss".format(split): p_loss.detach().mean(),
-                   "{}/rec_aux_loss".format(split): rec_aux_loss.detach().mean(),
-                   "{}/d_weight".format(split): d_weight.detach(),
-                   "{}/disc_factor".format(split): torch.tensor(disc_factor),
-                   "{}/g_loss".format(split): g_loss.detach().mean(),
-                   }
-            return loss, log
+            log = {f"total_ae_loss": loss.clone().detach().mean(),
+                   f"quant_ae_loss": codebook_loss.detach().mean(),
+                   f"nll_ae_loss": nll_loss.detach().mean(),
+                   f"rec_ae_loss": rec_loss.detach().mean(),
+                   f"p_ae_loss": p_loss.detach().mean(),
+                   f"rec_aux_ae_loss": rec_aux_loss.detach().mean(),
+                   f"d_weight": d_weight.detach(),
+                   f"disc_factor": torch.tensor(disc_factor),
+                   f"g_ae_loss": g_loss.detach().mean()}
+            
+            return log
 
         if optimizer_idx == 1:
             # second pass for discriminator update
@@ -143,8 +143,8 @@ class VQLPIPSWithDiscriminator(nn.Module):
             disc_factor = adopt_weight(self.disc_factor, global_step, threshold=self.discriminator_iter_start)
             d_loss = disc_factor * self.disc_loss(logits_real, logits_fake)
 
-            log = {"{}/disc_loss".format(split): d_loss.clone().detach().mean(),
-                   "{}/logits_real".format(split): logits_real.detach().mean(),
-                   "{}/logits_fake".format(split): logits_fake.detach().mean()
-                   }
-            return d_loss, log
+            log = {f"total_disc_loss": d_loss.clone().detach().mean(),
+                   f"logits_disc_real": logits_real.detach().mean(),
+                   f"logits_disc_fake": logits_fake.detach().mean()}
+            
+            return log
