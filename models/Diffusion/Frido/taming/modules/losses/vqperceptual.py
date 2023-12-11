@@ -119,15 +119,15 @@ class VQLPIPSWithDiscriminator(nn.Module):
             disc_factor = adopt_weight(self.disc_factor, global_step, threshold=self.discriminator_iter_start)
             loss = nll_loss + d_weight * disc_factor * g_loss + self.codebook_weight * codebook_loss.mean()
 
-            log = {f"total_ae_loss": loss.clone().detach().mean(),
-                   f"quant_ae_loss": codebook_loss.detach().mean(),
-                   f"nll_ae_loss": nll_loss.detach().mean(),
-                   f"rec_ae_loss": rec_loss.detach().mean(),
-                   f"p_ae_loss": p_loss.detach().mean(),
-                   f"rec_aux_ae_loss": rec_aux_loss.detach().mean(),
+            log = {f"total_ae": loss.clone().detach().mean(),
+                   f"quant_ae": codebook_loss.detach().mean(),
+                   f"nll_ae": nll_loss.detach().mean(),
+                   f"rec_ae": rec_loss.detach().mean(),
+                   f"p_ae": p_loss.detach().mean(),
+                   f"rec_aux_ae": rec_aux_loss.detach().mean(),
                    f"d_weight": d_weight.detach(),
                    f"disc_factor": torch.tensor(disc_factor),
-                   f"g_ae_loss": g_loss.detach().mean()}
+                   f"g_ae": g_loss.detach().mean()}
             
             return log
 
@@ -143,7 +143,7 @@ class VQLPIPSWithDiscriminator(nn.Module):
             disc_factor = adopt_weight(self.disc_factor, global_step, threshold=self.discriminator_iter_start)
             d_loss = disc_factor * self.disc_loss(logits_real, logits_fake)
 
-            log = {f"total_disc_loss": d_loss.clone().detach().mean(),
+            log = {f"total_disc": d_loss.clone().detach().mean(),
                    f"logits_disc_real": logits_real.detach().mean(),
                    f"logits_disc_fake": logits_fake.detach().mean()}
             
