@@ -199,7 +199,7 @@ class msvqgan(Module_base):
     def inference(self):
         pass
     
-    def get_image_log(self, batch, prefix="train", num_sampling = None):
+    def get_image_log(self, batch, num_sampling = None):
         I, C = self.get_input(batch, num_sampling)
         
         x = I
@@ -208,8 +208,8 @@ class msvqgan(Module_base):
         else:
             x_rec, _, _ = self(x)
         
-        return {f"{prefix}/real": x,
-                f"{prefix}/fake": x_rec}
+        return {f"real": x,
+                f"fake": x_rec}
          
     def configure_optimizers(self, lr):
         opt_ae = self.optimizer(list(self.encoder.parameters())+

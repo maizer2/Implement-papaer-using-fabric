@@ -5,7 +5,6 @@ import lightning.pytorch as pl
 
 import torch
 import torch.nn as nn
-from torch.optim import Adam
 from torch.optim.lr_scheduler import LambdaLR
 
 from torchvision.utils import make_grid
@@ -15,9 +14,9 @@ from run import get_obj_from_str, instantiate_from_config
 
 from diffusers import ControlNetModel, UNet2DConditionModel, AutoencoderKL, StableDiffusionControlNetPipeline
 
-
 from transformers import CLIPTextModel, CLIPTokenizer, CLIPFeatureExtractor
 
+from models.base import Lit_base, Module_base
 
 class DDPM(nn.Module):
     def __init__(self,
@@ -905,20 +904,21 @@ class diffusers_ControlNet_with_StableDiffusion(nn.Module):
         
         return optimizers, schedulers
     
-class frido(nn.Module):
+class frido(Module_base):
     def __init__(self, 
-                 optim_name: str,
+                 optim_target: str,
+                 criterion_config: tuple,
                  vae_config: tuple,
-                 unet_config: str,
-                 scheduler_config: str,
+                 unet_config: tuple,
+                 scheduler_config: tuple,
                  num_inference_steps: int = 50,
                  cloth_warpping: bool = False,
                  cloth_refinement: bool = False,
                  model_path: str = None
                  ):
-        super().__init__()
-        self.optimizer = getattr(importlib.import_module("torch.optim"), optim_name)
-        self.criterion = nn.MSELoss()
+        super().__init__(model_path)
+        self.optimizer = get_obj_from_str(optim_target)
+        self.criterion = instantiate_from_config(criterion_config)
         
         self.num_inference_steps = num_inference_steps
         self.cloth_warpping = cloth_warpping

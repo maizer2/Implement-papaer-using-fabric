@@ -101,7 +101,7 @@ class Lit_base(pl.LightningModule):
         return inputs
     
     def sampling(self, batch, prefix="train"):
-        outputs = self.model.get_image_log(batch, prefix, self.num_sampling)
+        outputs = self.model.get_image_log(batch, self.num_sampling)
         
         output_grids = self.get_grid(outputs)
         
