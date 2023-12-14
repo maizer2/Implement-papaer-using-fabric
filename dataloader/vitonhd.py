@@ -127,14 +127,6 @@ class VitonHDDataset(data.Dataset):
 
         assert all(x in possible_outputs for x in outputlist)
 
-        # Load Captions
-        if "captions" in self.outputlist:
-            try:
-                with open(PROJECT_ROOT / 'data' / 'noun_chunks' / caption_filename, 'r') as f:
-                    self.captions_dict = json.load(f)
-            except FileNotFoundError as e:
-                print(f"File {caption_filename} not found. NO captions will be loaded.")
-
         dataroot = self.dataroot
         if phase == 'train' or phase == 'val':
             filename = os.path.join(dataroot, f"{phase}_paired.txt")
@@ -168,12 +160,10 @@ class VitonHDDataset(data.Dataset):
         dataroot = self.dataroot_names[index]
         category = 'upper_body'
 
-        if "captions" in self.outputlist:  # Load captions
-            captions = self.captions_dict[c_name.split('_')[0]]
-            if self.phase == 'train':
-                random.shuffle(captions)
-            captions = ", ".join(captions)
-
+        if "captions" in self.outputlist:  # Captions
+            with open(os.path.join(dataroot, "captions", im_name.replace(".jpg", ".txt")), "r") as file:
+                captions = file.read()
+                
         if "clip_cloth_features" in self.outputlist:  # Precomputed CLIP in-shop embeddings
             clip_cloth_features = self.clip_cloth_features[self.clip_cloth_features_names.index(c_name)].float()
 

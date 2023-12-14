@@ -134,13 +134,6 @@ class DressCodeDataset(data.Dataset):
 
         assert all(x in possible_outputs for x in outputlist)
 
-        if "captions" in self.outputlist:
-            try:
-                with open(PROJECT_ROOT / 'data' / 'noun_chunks' / caption_filename, 'r') as f:
-                    self.captions_dict = json.load(f)
-            except FileNotFoundError as e:
-                print(f"File {caption_filename} not found. NO captions will be loaded.")
-
         for c in category:
             assert c in ['dresses', 'upper_body', 'lower_body']
 
@@ -178,13 +171,9 @@ class DressCodeDataset(data.Dataset):
         category = dataroot.split('/')[-1]
 
         if "captions" in self.outputlist:  # Captions
-            captions = self.captions_dict[c_name.split('_')[0]]
-            if self.phase == 'train':
-                # During training shuffle the captions
-                random.shuffle(captions)
-            # Join the captions into a single one
-            captions = ", ".join(captions)
-
+            with open(os.path.join(dataroot, "captions", im_name.replace(".jpg", ".txt")), "r") as file:
+                captions = file.read()
+                
         if "clip_cloth_features" in self.outputlist:  # Precomputed CLIP in-shop embeddings
             clip_cloth_features = self.clip_cloth_features[self.clip_cloth_features_names.index(c_name)].float()
 

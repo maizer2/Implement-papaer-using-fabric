@@ -522,3 +522,194 @@ class ladi_vton(Module_base):
                                                            word_embeddings, self.inversion_adapter.num_vstar).last_hidden_state
         
         return encoder_hidden_states
+    
+class frido(Module_base):
+    def __init__(self, 
+                 optim_target: str,
+                 criterion_config: tuple,
+                 vae_config: tuple,
+                 unet_config: tuple,
+                 scheduler_config: tuple,
+                 num_inference_steps: int = 50,
+                 cloth_warpping: bool = False,
+                 cloth_refinement: bool = False,
+                 img2img: bool = False,
+                 model_path: str = None
+                 ):
+        super().__init__(model_path)
+        self.optimizer = get_obj_from_str(optim_target)
+        self.criterion = instantiate_from_config(criterion_config)
+        
+        self.num_inference_steps = num_inference_steps
+        self.cloth_warpping = cloth_warpping
+        self.cloth_refinement = cloth_refinement
+        self.img2img = img2img
+        self.model_path = model_path
+        
+        self.tokenizer = CLIPTokenizer.from_pretrained("playgroundai/playground-v2-1024px-aesthetic", subfolder="tokenizer")
+        self.text_encoder = CLIPTextModel.from_pretrained("playgroundai/playground-v2-1024px-aesthetic", subfolder="text_encoder")
+        self.vae = instantiate_from_config(vae_config)
+        self.unet = instantiate_from_config(unet_config)
+        self.scheduler = instantiate_from_config(scheduler_config)
+        
+        if os.path.exists(model_path):
+            self.unet.load_state_dict(torch.load(model_path))
+    
+    def unet_init(self, in_channels):
+        # the posemap has 18 channels, the (encoded) cloth has 4 channels, the standard SD inpaining has 9 channels
+        with torch.no_grad():
+            # Replace the first conv layer of the unet with a new one with the correct number of input channels
+            conv_new = torch.nn.Conv2d(
+                in_channels=in_channels,
+                out_channels=self.unet.conv_in.out_channels,
+                kernel_size=3,
+                padding=1,
+            )
+
+            torch.nn.init.kaiming_normal_(conv_new.weight)  # Initialize new conv layer
+            conv_new.weight.data = conv_new.weight.data * 0.  # Zero-initialize new conv layer
+
+            conv_new.weight.data[:, :9] = self.unet.conv_in.weight.data  # Copy weights from old conv layer
+            conv_new.bias.data = self.unet.conv_in.bias.data  # Copy bias from old conv layer
+
+            self.unet.conv_in = conv_new  # replace conv layer in unet
+            self.unet.config['in_channels'] = in_channels  # update config
+            
+    def encode(self, x):
+        h_ms = self.vae.encoder(x)
+
+        h_ms = h_ms[::-1]
+        prev_h = []
+        h_out = []
+        for ii in range(len(h_ms)):
+
+            if len(prev_h) != 0:
+                for j in range(ii):
+                    prev_h[j] = self.vae.upsample[ii-1](prev_h[j])
+                    prev_h[j] = self.vae.shared_post_quant_conv[ii-1](prev_h[j])
+                
+                quant = torch.cat((*prev_h[:ii], h_ms[ii]), dim=1)
+                quant = self.vae.shared_decoder[ii-1](quant)
+                # quant = quant + prev_h
+            else:
+                quant = h_ms[ii]
+
+            h = self.vae.ms_quant_conv[ii](quant)
+            h_out.append(h)
+            quant, _, _ = self.vae.ms_quantize[ii](h)
+
+            prev_h.append(quant)
+
+        h_out = h_out[::-1]
+        # # upsample each resolutions
+        for i in range(len(h_out)):
+            for t in range(i):
+                h_out[i] = nn.functional.interpolate(h_out[i], scale_factor=2)
+        h_out = h_out[::-1]
+
+        h_out = torch.cat(h_out, dim=1) # channel-wise concate
+
+        return h_out
+    
+    def decode(self, z):
+        h_ms = []
+        start = 0
+        for i in range(len(self.vae.embed_dim)):
+            h_ms.append(z[:, start:start+self.vae.embed_dim[i], :, :])
+            start += self.vae.embed_dim[i]
+
+        qaunt_ms = []
+        for ii in range(len(h_ms)):
+            quant, emb_loss, info = self.vae.ms_quantize[ii](h_ms[ii])
+            qaunt_ms.append(quant)
+
+        qaunt_ms = qaunt_ms[::-1]
+        quant = torch.cat(qaunt_ms, dim=1) # channel-wise concate
+
+        quant = self.vae.post_quant_conv(quant)
+        dec = self.vae.decoder(quant)
+        
+        return dec
+    
+    def forward(self):
+        pass
+    
+    def forward_diffusion_process(self, z0, noise = None, t = None):
+        if noise is None:
+            noise = torch.randn(z0.shape, dtype=z0.dtype, device=z0.device)
+        
+        if t is None:
+            t = torch.full((z0.size(0), ), self.scheduler.timesteps[0], dtype=torch.long, device=z0.device)
+            
+        xT = self.scheduler.add_noise(z0, noise, t)
+        
+        return xT
+    
+    def reverse_diffusion_process(self):
+        pass
+    
+    def get_input(self, batch, num_sampling = None):
+        I = batch["image"]
+        C = batch["cloth"]
+        I_M = batch["im_mask"]
+        m = batch["inpaint_mask"].to(torch.float32)
+        p = batch["pose_map"]
+        C_W = self.get_warped_cloth(batch)
+        captions = batch["captions"]
+        
+        if num_sampling is not None:
+            I = I[:num_sampling]
+            C = C[:num_sampling]
+            I_M = I_M[:num_sampling]
+            m = m[:num_sampling]
+            p = p[:num_sampling]
+            C_W = C_W[:num_sampling]
+            captions = captions[:num_sampling]
+                
+        m = nn.functional.interpolate(m, size=(m.shape[2] // 8, m.shape[3] // 8), mode="bilinear")
+        p = nn.functional.interpolate(p, size=(p.shape[2] // 8, p.shape[3] // 8), mode="bilinear")
+        latent = self.encode(I)
+        C_W = self.vae.encode(C_W)
+        I_M = self.vae.encoder(I_M)[0]
+        
+        unet_input = torch.cat([m, p, C_W, I_M], 1)
+        noise = torch.randn(latent.shape, dtype=torch.float32).cuda()
+        encoder_hidden_states = self.encode_prompt(captions)
+        
+        return latent, unet_input, noise, encoder_hidden_states
+    
+    def get_loss(self, batch):
+        pass
+        
+    def inference(self):
+        pass
+    
+    def encode_prompt(self, text):
+        with torch.no_grad():
+            tokenized_text = self.tokenizer(text,
+                                            padding="max_length",
+                                            max_length=self.tokenizer.model_max_length,
+                                            truncation=True,
+                                            return_tensors="pt").input_ids.cuda()
+            
+            encoder_hidden_states = self.text_encoder(tokenized_text).last_hidden_state
+
+        return encoder_hidden_states
+ 
+    def get_image_log(self):
+        pass
+    
+    def save_model(self):
+        torch.save(self.unet.state_dict(), self.model_path)
+        
+    def configure_optimizers(self, lr):
+        optim = self.optimizer(self(), lr)
+        
+        lambda2 = lambda epoch: 0.95 ** epoch
+        
+        scheduler = LambdaLR(optim, lambda2)
+        
+        optimizers = [optim]
+        schedulers = [scheduler]
+        
+        return optimizers, schedulers

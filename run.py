@@ -38,7 +38,7 @@ def get_config(opt):
     config = OmegaConf.load(opt.config)
         
     model_config, logger_config, lightning_config, data_config = config.model, config.logger, config.lightning, config.dataset
-        
+
     return model_config, logger_config, lightning_config, data_config
 
 def transform_init(datasets, transform):
@@ -97,13 +97,14 @@ if __name__ == "__main__":
     
     logger = TensorBoardLogger(logger_config.logger_path)
     
-    trainer = pl.Trainer(logger=logger,
-                         callbacks=[
-                             EarlyStopping(**lightning_config.earlystop_params),
-                             LearningRateMonitor(**lightning_config.monitor_params)
-                             ],
-                         **lightning_config.trainer,
-                         )
+    callbacks = []
+    if "earlystop_params" in lightning_config:
+        callbacks.append(EarlyStopping(**lightning_config.earlystop_params))
+    if "monitor_params" in lightning_config:
+        callbacks.append(LearningRateMonitor(**lightning_config.monitor_params))
+        
+    trainer = pl.Trainer(logger=logger, callbacks=callbacks,
+                         **lightning_config.trainer)
     
     if not opt.inference:
         trainer.fit(model=model,

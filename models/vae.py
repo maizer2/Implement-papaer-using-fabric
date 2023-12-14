@@ -92,8 +92,20 @@ class msvqgan(Module_base):
             self.register_buffer("colorize", torch.randn(3, colorize_nlabels, 1, 1))
         
         if os.path.exists(model_path):
-            self.load_state_dict(torch.load(model_path))
-            
+            state_dict = torch.load(model_path)["state_dict"]
+            state_dict = self.state_dict_pre_processing(state_dict)
+            self.load_state_dict(state_dict)
+    
+    def state_dict_pre_processing(self, state_dict):
+        new_state_dict = {}
+        for key in state_dict.keys():
+            if "loss" in key.split(".")[0]:
+                new_state_dict["criterion" + key[4:]] = state_dict[key]
+            else:
+                new_state_dict[key] = state_dict[key]
+                
+        return new_state_dict
+    
     def encode(self, x):
         h_ms = self.encoder(x)
 
@@ -132,6 +144,7 @@ class msvqgan(Module_base):
 
         quant = torch.cat(qaunt_ms, dim=1) # channel-wise concate
         emb_loss = sum(emb_loss_ms)
+        
         return quant, emb_loss, info_ms
 
     def decode(self, quant):
@@ -257,7 +270,7 @@ class Lit_msvqgan(Lit_base):
         optim_ae.zero_grad()
         self.logging_loss(losses_ae, "train")
         self.logging_output(batch, "train")
-        self.manual_backward(losses_ae["total_ae_loss"].requires_grad_(True))
+        self.manual_backward(losses_ae["total_ae"].requires_grad_(True))
         optim_ae.step()
         
         self.untoggle_optimizer(optim_ae)
@@ -266,7 +279,7 @@ class Lit_msvqgan(Lit_base):
         
         optim_disc.zero_grad()
         self.logging_loss(losses_disc, "train")
-        self.manual_backward(losses_disc["total_disc_loss"].requires_grad_(True))
+        self.manual_backward(losses_disc["total_disc"].requires_grad_(True))
         optim_disc.step()
         
         self.untoggle_optimizer(optim_disc)
