@@ -225,8 +225,8 @@ class msvqgan(Module_base):
         else:
             x_rec, _, _ = self(x)
         
-        return {f"real": x,
-                f"fake": x_rec}
+        return {"real": x,
+                "fake": x_rec}
          
     def configure_optimizers(self, lr):
         opt_ae = self.optimizer(list(self.encoder.parameters())+

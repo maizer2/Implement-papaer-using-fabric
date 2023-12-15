@@ -927,15 +927,31 @@ class frido(Module_base):
         self.cloth_refinement = cloth_refinement
         self.img2img = img2img
         
-        self.tokenizer = CLIPTokenizer.from_pretrained("playgroundai/playground-v2-1024px-aesthetic", subfolder="tokenizer_2")
-        self.text_encoder = CLIPTextModel.from_pretrained("playgroundai/playground-v2-1024px-aesthetic", subfolder="text_encoder_2")
+        self.tokenizer = CLIPTokenizer.from_pretrained("playgroundai/playground-v2-1024px-aesthetic", subfolder="tokenizer")
+        self.text_encoder = CLIPTextModel.from_pretrained("playgroundai/playground-v2-1024px-aesthetic", subfolder="text_encoder")
         self.vae = instantiate_from_config(vae_config)
         self.unet = instantiate_from_config(unet_config)
         self.scheduler = instantiate_from_config(scheduler_config)
         
         if os.path.exists(model_path):
-            self.unet.load_state_dict(torch.load(model_path))
+            state_dict = torch.load(model_path)
+            state_dict = self.state_dict_pre_processing(state_dict)
+            self.unet.load_state_dict(state_dict)
 
+    def state_dict_pre_processing(self, state_dict):
+        new_state_dict = {}
+        
+        if "state_dict" in state_dict.keys():
+            state_dict = state_dict["state_dict"]
+        
+        for key in state_dict.keys():
+            if "model.diffusion_model" in key:
+                new_state_dict[key.replace("model.diffusion_model.", "")] = state_dict[key]
+            # else:
+            #     new_state_dict[key] = state_dict[key]
+                
+        return new_state_dict
+    
     def unet_init(self, in_channels):
         # the posemap has 18 channels, the (encoded) cloth has 4 channels, the standard SD inpaining has 9 channels
         with torch.no_grad():
@@ -1046,14 +1062,13 @@ class frido(Module_base):
             for timesteps in self.scheduler.timesteps:
                 t = torch.full((z0_pred.size(0),), timesteps, dtype=torch.long).cuda()
                 zt_rec = self.unet(z0_pred, t, c, stage=s)
-                z0_pred = self.scheduler.step()
                 
                 if self.unet.use_split_head:
-                    z0_pred = self.scheduler.step(zt_rec, t,
-                                                  z0_pred[:, start_channels:end_channels, :, :])
+                    z0_pred[:, start_channels: end_channels] = self.scheduler.step(zt_rec, timesteps, 
+                                                                                   z0_pred[:, start_channels:end_channels, :, :]).prev_sample
                 else:
-                    z0_pred = self.scheduler.step(zt_rec[:, start_channels:end_channels, :, :], t,
-                                                  z0_pred[:, start_channels:end_channels, :, :])
+                    z0_pred[:, start_channels: end_channels] = self.scheduler.step(zt_rec[:, start_channels:end_channels, :, :], timesteps, 
+                                                                                   z0_pred[:, start_channels:end_channels, :, :]).prev_sample
                 
         return z0_pred
     
@@ -1107,7 +1122,7 @@ class frido(Module_base):
             
             encoder_hidden_states = self.text_encoder(tokenized_text).last_hidden_state
 
-            encoder_hidden_states = encoder_hidden_states.view(encoder_hidden_states.size(0), -1, 640)
+            # encoder_hidden_states = encoder_hidden_states.view(encoder_hidden_states.size(0), -1, 640)
             
         return encoder_hidden_states
  
@@ -1120,13 +1135,13 @@ class frido(Module_base):
             zT = None
             
         z0_pred = self.reverse_diffusion_process(zT=zT, 
-                                                 shape=zT.shape, 
-                                                 c=encoder_hidden_states)
+                                                shape=z0.shape, 
+                                                c=encoder_hidden_states)
         
         x0_pred = self.decode(z0_pred)
 
-        return {batch["image"]: "real",
-                x0_pred: "fake"}
+        return {"real": batch["image"],
+                "fake": x0_pred}
         
     def save_model(self):
         torch.save(self.unet.state_dict(), self.model_path)
