@@ -1,5 +1,5 @@
 import importlib, os
-from typing import Any, Optional, Union, Dict, 
+from typing import Any, Optional, Union, Dict
 
 import lightning.pytorch as pl
 
@@ -927,15 +927,15 @@ class frido(Module_base):
         self.cloth_refinement = cloth_refinement
         self.img2img = img2img
         
-        self.tokenizer = CLIPTokenizer.from_pretrained("playgroundai/playground-v2-1024px-aesthetic", subfolder="tokenizer")
-        self.text_encoder = CLIPTextModel.from_pretrained("playgroundai/playground-v2-1024px-aesthetic", subfolder="text_encoder")
+        self.tokenizer = CLIPTokenizer.from_pretrained("playgroundai/playground-v2-1024px-aesthetic", subfolder="tokenizer_2")
+        self.text_encoder = CLIPTextModel.from_pretrained("playgroundai/playground-v2-1024px-aesthetic", subfolder="text_encoder_2")
         self.vae = instantiate_from_config(vae_config)
         self.unet = instantiate_from_config(unet_config)
         self.scheduler = instantiate_from_config(scheduler_config)
         
         if os.path.exists(model_path):
             self.unet.load_state_dict(torch.load(model_path))
-    
+
     def unet_init(self, in_channels):
         # the posemap has 18 channels, the (encoded) cloth has 4 channels, the standard SD inpaining has 9 channels
         with torch.no_grad():
@@ -1015,19 +1015,47 @@ class frido(Module_base):
     def forward(self):
         pass
     
-    def forward_diffusion_process(self, z0, noise = None, t = None):
+    def forward_diffusion_process(self, z0, noise = None, t = None, s_c = None, e_c = None):
         if noise is None:
             noise = torch.randn(z0.shape, dtype=z0.dtype, device=z0.device)
         
         if t is None:
             t = torch.full((z0.size(0), ), self.scheduler.timesteps[0], dtype=torch.long, device=z0.device)
-            
-        xT = self.scheduler.add_noise(z0, noise, t)
         
-        return xT
+        if (s_c is None) and (e_c is None):
+            xt = self.scheduler.add_noise(z0, noise, t)
+        else:
+            xt = self.scheduler.add_noise(z0[:, s_c:, :, :], noise[:, s_c:, :, :], t)
+            xt[:, e_c:, :, :] = noise[:, e_c:, :, :]
+        
+        return xt
     
-    def reverse_diffusion_process(self):
-        pass
+    def reverse_diffusion_process(self, zT = None, shape = None, c = None):
+        if zT is None:
+            zT = torch.randn(shape, dtype=torch.float32).cuda()
+        
+        if c is None:
+            c = self.encode_prompt(["" * shape[0]])
+        
+        z0_pred = zT
+        self.scheduler.set_timesteps(self.num_inference_steps, zT.device)
+        for s in range(len(self.vae.res_list)):
+            start_channels = sum(self.vae.embed_dim[:s])
+            end_channels = sum(self.vae.embed_dim[:s+1])
+        
+            for timesteps in self.scheduler.timesteps:
+                t = torch.full((z0_pred.size(0),), timesteps, dtype=torch.long).cuda()
+                zt_rec = self.unet(z0_pred, t, c, stage=s)
+                z0_pred = self.scheduler.step()
+                
+                if self.unet.use_split_head:
+                    z0_pred = self.scheduler.step(zt_rec, t,
+                                                  z0_pred[:, start_channels:end_channels, :, :])
+                else:
+                    z0_pred = self.scheduler.step(zt_rec[:, start_channels:end_channels, :, :], t,
+                                                  z0_pred[:, start_channels:end_channels, :, :])
+                
+        return z0_pred
     
     def get_input(self, batch, num_sampling = None):
         I = batch["image"]
@@ -1038,14 +1066,33 @@ class frido(Module_base):
             captions = captions[:num_sampling]
                 
         latent = self.encode(I)
-        
         noise = torch.randn(latent.shape, dtype=torch.float32).cuda()
         encoder_hidden_states = self.encode_prompt(captions)
+        timesteps = torch.randint(0, len(self.scheduler.timesteps), (latent.size(0), ), dtype=torch.long, device=latent.device)
         
-        return latent, noise, encoder_hidden_states
+        return latent, noise, timesteps, encoder_hidden_states
     
     def get_loss(self, batch):
-        pass
+        z0, noise, t, c = self.get_input(batch)
+        
+        loss = torch.tensor(0.).cuda()
+        loss_ratio = 1 / len(self.vae.embed_dim)
+        for s in range(len(self.vae.res_list)):
+            
+            start_channels = sum(self.vae.embed_dim[:s])
+            end_channels = sum(self.vae.embed_dim[:s+1])
+        
+            zt = self.forward_diffusion_process(z0, noise, t, start_channels, end_channels)
+            zt_rec = self.unet(zt, t, c, stage=s)
+            
+            if self.unet.use_split_head:
+                loss += self.criterion(zt_rec, 
+                                       noise[:, start_channels:end_channels, :, :]) * loss_ratio
+            else:
+                loss += self.criterion(zt_rec[:, start_channels:end_channels, :, :], 
+                                       noise[:, start_channels:end_channels, :, :]) * loss_ratio
+            
+            return {"total": loss}
         
     def inference(self):
         pass
@@ -1060,16 +1107,32 @@ class frido(Module_base):
             
             encoder_hidden_states = self.text_encoder(tokenized_text).last_hidden_state
 
+            encoder_hidden_states = encoder_hidden_states.view(encoder_hidden_states.size(0), -1, 640)
+            
         return encoder_hidden_states
  
-    def get_image_log(self):
-        pass
-    
+    def get_image_log(self, batch, num_sampling):
+        z0, noise, _, encoder_hidden_states = self.get_input(batch, num_sampling)
+        
+        if self.img2img:
+            zT = self.forward_diffusion_process(z0, noise)
+        else:
+            zT = None
+            
+        z0_pred = self.reverse_diffusion_process(zT=zT, 
+                                                 shape=zT.shape, 
+                                                 c=encoder_hidden_states)
+        
+        x0_pred = self.decode(z0_pred)
+
+        return {batch["image"]: "real",
+                x0_pred: "fake"}
+        
     def save_model(self):
         torch.save(self.unet.state_dict(), self.model_path)
         
     def configure_optimizers(self, lr):
-        optim = self.optimizer(self(), lr)
+        optim = self.optimizer(self.unet.parameters(), lr)
         
         lambda2 = lambda epoch: 0.95 ** epoch
         

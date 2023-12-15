@@ -5,8 +5,8 @@ import torch.nn.functional as F
 from torch import nn, einsum
 from einops import rearrange, repeat
 
-from frido.modules.diffusionmodules.util import checkpoint
-from frido.modules.diffusionmodules.spade_norm import SPADE
+from models.Diffusion.Frido.frido.modules.diffusionmodules.util import checkpoint
+from models.Diffusion.Frido.frido.modules.diffusionmodules.spade_norm import SPADE
 
 def exists(val):
     return val is not None

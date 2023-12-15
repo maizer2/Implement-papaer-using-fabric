@@ -10,8 +10,8 @@ from einops import rearrange
 from glob import glob
 from natsort import natsorted
 
-from Frido.frido.modules.diffusionmodules.pyunet import EncoderUNetModel, UNetModel
-from frido.util import log_txt_as_img, default, ismap, instantiate_from_config
+from models.Diffusion.Frido.frido.frido.modules.diffusionmodules.pyunet import EncoderUNetModel, UNetModel
+from models.Diffusion.Frido.frido.util import log_txt_as_img, default, ismap, instantiate_from_config
 
 __models__ = {
     'class_label': EncoderUNetModel,

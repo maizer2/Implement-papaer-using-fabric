@@ -6,7 +6,7 @@ from torch import nn
 import torch.nn.functional as F
 import pytorch_lightning as pl
 
-from frido.util import instantiate_from_config_main as instantiate_from_config
+from models.Diffusion.Frido.frido.util import instantiate_from_config_main as instantiate_from_config
 
 from models.Diffusion.Frido.taming.modules.diffusionmodules.model import Encoder, Decoder, MSEncoder
 from models.Diffusion.Frido.taming.modules.vqvae.quantize import VectorQuantizer2 as VectorQuantizer

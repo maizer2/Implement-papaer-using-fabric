@@ -92,12 +92,16 @@ class msvqgan(Module_base):
             self.register_buffer("colorize", torch.randn(3, colorize_nlabels, 1, 1))
         
         if os.path.exists(model_path):
-            state_dict = torch.load(model_path)["state_dict"]
+            state_dict = torch.load(model_path)
             state_dict = self.state_dict_pre_processing(state_dict)
             self.load_state_dict(state_dict)
     
     def state_dict_pre_processing(self, state_dict):
         new_state_dict = {}
+        
+        if "state_dict" in state_dict.keys():
+            state_dict = state_dict["state_dict"]
+        
         for key in state_dict.keys():
             if "loss" in key.split(".")[0]:
                 new_state_dict["criterion" + key[4:]] = state_dict[key]

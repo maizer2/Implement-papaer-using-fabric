@@ -20,12 +20,12 @@ from tqdm import tqdm
 from torchvision.utils import make_grid
 from pytorch_lightning.utilities.distributed import rank_zero_only
 
-from frido.util import log_txt_as_img, exists, default, ismap, isimage, mean_flat, count_params, instantiate_from_config
-from frido.modules.ema import LitEma
-from frido.modules.distributions.distributions import normal_kl, DiagonalGaussianDistribution
-from frido.models.autoencoder import VQModelInterface, IdentityFirstStage, AutoencoderKL
-from frido.modules.diffusionmodules.util import make_beta_schedule, extract_into_tensor, noise_like
-from frido.models.diffusion.ddim import DDIMSampler
+from models.Diffusion.Frido.frido.util import log_txt_as_img, exists, default, ismap, isimage, mean_flat, count_params, instantiate_from_config
+from models.Diffusion.Frido.frido.modules.ema import LitEma
+from models.Diffusion.Frido.frido.modules.distributions.distributions import normal_kl, DiagonalGaussianDistribution
+from models.Diffusion.Frido.frido.models.autoencoder import VQModelInterface, IdentityFirstStage, AutoencoderKL
+from models.Diffusion.Frido.frido.modules.diffusionmodules.util import make_beta_schedule, extract_into_tensor, noise_like
+from models.Diffusion.Frido.frido.models.diffusion.ddim import DDIMSampler
 
 __conditioning_keys__ = {'concat': 'c_concat',
                          'crossattn': 'c_crossattn',

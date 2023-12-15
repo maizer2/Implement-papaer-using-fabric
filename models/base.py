@@ -62,7 +62,7 @@ class Lit_base(pl.LightningModule):
         self.logging_loss(losses, "train")
         self.logging_output(batch, "train")
         
-        return losses["train/total_loss"]
+        return losses["total"]
     
     def on_train_epoch_end(self):
         self.model.save_model()

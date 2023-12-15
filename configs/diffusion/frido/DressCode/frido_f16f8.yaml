@@ -7,14 +7,12 @@ model:
     model_config:
       target: models.diffusion.frido
       params:
+        optim_target: torch.optim.adamw.AdamW
         num_inference_steps: 50
         cloth_warpping: False
         cloth_refinement: False
-        optim_target: torch.optim.adam.Adam
         img2img: False
-        model_path: checkpoints/diffusion/frido/msvqgan/DressCode/msvqgan_DressCode.ckpt
-        embed_dim: [4, 4]
-        n_embed: [8192, 8192]
+        model_path: checkpoints/diffusion/frido/msvqgan/DressCode/frido_f16f8.ckpt
         criterion_config:
           target: torch.nn.MSELoss
         scheduler_config:
@@ -24,8 +22,8 @@ model:
         vae_config:
           target: models.vae.msvqgan
           params:
-            optim_target: models.Diffusion.Frido.taming.modules.losses.DummyLoss
-            model_path: checkpoints/diffusion/frido/msvqgan/DressCode/msvqgan_DressCode.ckpt
+            optim_target: torch.optim.adam.Adam
+            model_path: checkpoints/diffusion/frido/msvqgan/DressCode/msvqgan_f16f8.ckpt
             embed_dim: [4, 4]
             n_embed: [8192, 8192]
             encoder_config:
@@ -56,14 +54,21 @@ model:
                 attn_resolutions: [32]
                 dropout: 0.0
             criterion_config:
-              target: models.Diffusion.Frido.taming.modules.losses.DummyLoss
+              target: models.Diffusion.Frido.taming.modules.losses.vqperceptual.VQLPIPSWithDiscriminator
+              params:
+                disc_conditional: False
+                disc_in_channels: 3
+                disc_num_layers: 2
+                disc_start: 30001
+                disc_weight: 0.8
+                codebook_weight: 1.0
         unet_config:
-          target: models.Diffusion.Frido.frido.modules.diffusionmodules.pyunet.PyUnetModel
+          target: models.Diffusion.Frido.frido.modules.diffusionmodules.pyunet.PyUNetModel
           params:
+            image_size: 32
             use_split_head: true
             split_embed_dim_list: [4, 4]
             use_SPADE_norm: true
-            image_size: 32
             in_channels: 8
             out_channels: 8
             model_channels: 192
@@ -88,7 +93,7 @@ logger:
     
 lightning:
   trainer:
-    strategy: ddp_find_unused_parameters_False
+    strategy: ddp_find_unused_parameters_True
     # precision: 16-mixed
     max_epochs: 100000
     sync_batchnorm: True
@@ -115,17 +120,8 @@ dataset:
       - lower_body
       - dresses
       outputlist: &data_outputlist
-      - c_name
       - im_name
       - image
-      - cloth
-      - inpaint_mask
-      - pose_map
-      - im_head
-      - im_pose
-      - im_cloth
-      - category
-      - im_mask
       - captions
   val:
     target: *data_target

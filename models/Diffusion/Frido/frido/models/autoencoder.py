@@ -5,10 +5,10 @@ from contextlib import contextmanager
 
 from models.Diffusion.Frido.taming.modules.vqvae.quantize import VectorQuantizer2 as VectorQuantizer
 
-from frido.modules.diffusionmodules.model import Encoder, Decoder
-from frido.modules.distributions.distributions import DiagonalGaussianDistribution
+from models.Diffusion.Frido.frido.modules.diffusionmodules.model import Encoder, Decoder
+from models.Diffusion.Frido.frido.modules.distributions.distributions import DiagonalGaussianDistribution
 
-from frido.util import instantiate_from_config
+from models.Diffusion.Frido.frido.util import instantiate_from_config
 
 
 class VQModel(pl.LightningModule):

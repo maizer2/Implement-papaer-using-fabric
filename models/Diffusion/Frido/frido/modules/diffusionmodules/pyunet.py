@@ -10,7 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import copy
 
-from frido.modules.diffusionmodules.util import (
+from models.Diffusion.Frido.frido.modules.diffusionmodules.util import (
     checkpoint,
     conv_nd,
     linear,
@@ -19,8 +19,8 @@ from frido.modules.diffusionmodules.util import (
     normalization,
     timestep_embedding,
 )
-from frido.modules.attention import SpatialTransformer
-from frido.modules.diffusionmodules.spade_norm import SPADE
+from models.Diffusion.Frido.frido.modules.attention import SpatialTransformer
+from models.Diffusion.Frido.frido.modules.diffusionmodules.spade_norm import SPADE
 
 # dummy replace
 def convert_module_to_f16(x):

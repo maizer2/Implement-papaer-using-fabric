@@ -13,10 +13,10 @@ import torchvision
 from torch.utils.data import random_split, DataLoader, Dataset, Sampler
 import pytorch_lightning as pl
 
-from frido.util import log_txt_as_img, exists, default, ismap, isimage, mean_flat, count_params
-from frido.models.diffusion.ddim import DDIMSampler
-from frido.models.diffusion.plms import PLMSSampler
-from frido.util import instantiate_from_config_main as instantiate_from_config
+from models.Diffusion.Frido.frido.util import log_txt_as_img, exists, default, ismap, isimage, mean_flat, count_params
+from models.Diffusion.Frido.frido.models.diffusion.ddim import DDIMSampler
+from models.Diffusion.Frido.frido.models.diffusion.plms import PLMSSampler
+from models.Diffusion.Frido.frido.util import instantiate_from_config_main as instantiate_from_config
 
 from models.Diffusion.Frido.taming.data.utils import custom_collate
 
