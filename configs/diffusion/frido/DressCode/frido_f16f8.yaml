@@ -9,8 +9,6 @@ model:
       params:
         optim_target: torch.optim.adamw.AdamW
         num_inference_steps: 50
-        cloth_warpping: False
-        cloth_refinement: False
         img2img: False
         model_path: checkpoints/diffusion/frido/frido/DressCode/frido_f16f8.ckpt
         criterion_config:

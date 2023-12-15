@@ -913,8 +913,6 @@ class frido(Module_base):
                  unet_config: tuple,
                  scheduler_config: tuple,
                  num_inference_steps: int = 50,
-                 cloth_warpping: bool = False,
-                 cloth_refinement: bool = False,
                  img2img: bool = False,
                  model_path: str = None
                  ):
@@ -923,8 +921,6 @@ class frido(Module_base):
         self.criterion = instantiate_from_config(criterion_config)
         
         self.num_inference_steps = num_inference_steps
-        self.cloth_warpping = cloth_warpping
-        self.cloth_refinement = cloth_refinement
         self.img2img = img2img
         
         self.tokenizer = CLIPTokenizer.from_pretrained("playgroundai/playground-v2-1024px-aesthetic", subfolder="tokenizer")
@@ -947,8 +943,8 @@ class frido(Module_base):
         for key in state_dict.keys():
             if "model.diffusion_model" in key:
                 new_state_dict[key.replace("model.diffusion_model.", "")] = state_dict[key]
-            # else:
-            #     new_state_dict[key] = state_dict[key]
+            elif key in self.unet.state_dict().keys():
+                new_state_dict[key] = state_dict[key]
                 
         return new_state_dict
     
