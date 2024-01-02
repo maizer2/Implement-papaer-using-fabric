@@ -11,7 +11,7 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "justMyCode": false,
-            "args": ["--config", "configs/diffusion/frido/DressCode/frido_f16f8.yaml"]
+            "args": ["--config", "configs/vton/custom_vton/DressCode/custom_vton.yaml"]
         }
     ]
 }

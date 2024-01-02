@@ -1046,7 +1046,6 @@ class frido(Module_base):
             for timesteps in self.scheduler.timesteps:
                 t = torch.full((z0_pred.size(0),), timesteps, dtype=torch.long).cuda()
                 zt_rec = self.unet(z0_pred, t, c, stage=s)
-                z0_pred = self.scheduler.step()
                 
                 if self.unet.use_split_head:
                     z0_pred = self.scheduler.step(zt_rec, t,
@@ -1120,7 +1119,7 @@ class frido(Module_base):
             zT = None
             
         z0_pred = self.reverse_diffusion_process(zT=zT, 
-                                                 shape=zT.shape, 
+                                                 shape=z0.shape, 
                                                  c=encoder_hidden_states)
         
         x0_pred = self.decode(z0_pred)

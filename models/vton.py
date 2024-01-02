@@ -13,7 +13,6 @@ from torchvision import transforms
 from diffusers import UNet2DConditionModel, StableDiffusionInpaintPipeline
 from transformers import CLIPTextModel, CLIPTokenizer, CLIPVisionModelWithProjection, AutoProcessor
 
-from models.VITON.ladi_vton.models.autoencoder_kl import AutoencoderKL
 from models.VITON.ladi_vton.models.inversion_adapter import InversionAdapter
 from models.VITON.ladi_vton.utils.encode_text_word_embedding import encode_text_word_embedding
 
@@ -210,6 +209,8 @@ class ladi_vton(Module_base):
         
         self.text_encoder = CLIPTextModel.from_pretrained("stabilityai/stable-diffusion-2-inpainting", subfolder="text_encoder")
         self.tokenizer = CLIPTokenizer.from_pretrained("stabilityai/stable-diffusion-2-inpainting", subfolder="tokenizer")
+        
+        from models.VITON.ladi_vton.models.autoencoder_kl import AutoencoderKL
         self.vae = AutoencoderKL.from_pretrained("stabilityai/stable-diffusion-2-inpainting", subfolder="vae")
         self.unet = UNet2DConditionModel.from_pretrained("stabilityai/stable-diffusion-2-inpainting", subfolder="unet")
 
@@ -522,14 +523,14 @@ class ladi_vton(Module_base):
                                                            word_embeddings, self.inversion_adapter.num_vstar).last_hidden_state
         
         return encoder_hidden_states
-    
-class frido(Module_base):
+     
+class custom_vton(Module_base):
     def __init__(self, 
                  optim_target: str,
                  criterion_config: tuple,
-                 vae_config: tuple,
-                 unet_config: tuple,
                  scheduler_config: tuple,
+                 dataset_name: str, # ["vitonhd", "dresscode"]
+                 in_channels: int = 31,
                  num_inference_steps: int = 50,
                  cloth_warpping: bool = False,
                  cloth_refinement: bool = False,
@@ -540,21 +541,30 @@ class frido(Module_base):
         self.optimizer = get_obj_from_str(optim_target)
         self.criterion = instantiate_from_config(criterion_config)
         
+        self.in_channels = in_channels
         self.num_inference_steps = num_inference_steps
         self.cloth_warpping = cloth_warpping
         self.cloth_refinement = cloth_refinement
         self.img2img = img2img
-        self.model_path = model_path
         
-        self.tokenizer = CLIPTokenizer.from_pretrained("playgroundai/playground-v2-1024px-aesthetic", subfolder="tokenizer")
-        self.text_encoder = CLIPTextModel.from_pretrained("playgroundai/playground-v2-1024px-aesthetic", subfolder="text_encoder")
-        self.vae = instantiate_from_config(vae_config)
-        self.unet = instantiate_from_config(unet_config)
+        self.tps, self.refinement = torch.hub.load(repo_or_dir='miccunifi/ladi-vton', source='github', model='warping_module', 
+                                                   dataset=dataset_name)
+        
+        self.tokenizer = CLIPTokenizer.from_pretrained("stabilityai/stable-diffusion-2-inpainting", subfolder="tokenizer")
+        self.text_encoder = CLIPTextModel.from_pretrained("stabilityai/stable-diffusion-2-inpainting", subfolder="text_encoder")
+        
+        from diffusers.models.autoencoder_kl import AutoencoderKL
+        self.vae = AutoencoderKL.from_pretrained("stabilityai/stable-diffusion-2-inpainting", subfolder="vae")
+        self.unet = UNet2DConditionModel.from_pretrained("stabilityai/stable-diffusion-2-inpainting", subfolder="unet")
         self.scheduler = instantiate_from_config(scheduler_config)
+
+        self.unet_init(in_channels)
         
         if os.path.exists(model_path):
             self.unet.load_state_dict(torch.load(model_path))
-    
+
+        model_eval([self.tps, self.refinement, self.text_encoder, self.vae])
+        
     def unet_init(self, in_channels):
         # the posemap has 18 channels, the (encoded) cloth has 4 channels, the standard SD inpaining has 9 channels
         with torch.no_grad():
@@ -575,78 +585,93 @@ class frido(Module_base):
             self.unet.conv_in = conv_new  # replace conv layer in unet
             self.unet.config['in_channels'] = in_channels  # update config
             
-    def encode(self, x):
-        h_ms = self.vae.encoder(x)
-
-        h_ms = h_ms[::-1]
-        prev_h = []
-        h_out = []
-        for ii in range(len(h_ms)):
-
-            if len(prev_h) != 0:
-                for j in range(ii):
-                    prev_h[j] = self.vae.upsample[ii-1](prev_h[j])
-                    prev_h[j] = self.vae.shared_post_quant_conv[ii-1](prev_h[j])
-                
-                quant = torch.cat((*prev_h[:ii], h_ms[ii]), dim=1)
-                quant = self.vae.shared_decoder[ii-1](quant)
-                # quant = quant + prev_h
-            else:
-                quant = h_ms[ii]
-
-            h = self.vae.ms_quant_conv[ii](quant)
-            h_out.append(h)
-            quant, _, _ = self.vae.ms_quantize[ii](h)
-
-            prev_h.append(quant)
-
-        h_out = h_out[::-1]
-        # # upsample each resolutions
-        for i in range(len(h_out)):
-            for t in range(i):
-                h_out[i] = nn.functional.interpolate(h_out[i], scale_factor=2)
-        h_out = h_out[::-1]
-
-        h_out = torch.cat(h_out, dim=1) # channel-wise concate
-
-        return h_out
-    
-    def decode(self, z):
-        h_ms = []
-        start = 0
-        for i in range(len(self.vae.embed_dim)):
-            h_ms.append(z[:, start:start+self.vae.embed_dim[i], :, :])
-            start += self.vae.embed_dim[i]
-
-        qaunt_ms = []
-        for ii in range(len(h_ms)):
-            quant, emb_loss, info = self.vae.ms_quantize[ii](h_ms[ii])
-            qaunt_ms.append(quant)
-
-        qaunt_ms = qaunt_ms[::-1]
-        quant = torch.cat(qaunt_ms, dim=1) # channel-wise concate
-
-        quant = self.vae.post_quant_conv(quant)
-        dec = self.vae.decoder(quant)
-        
-        return dec
-    
-    def forward(self):
-        pass
-    
-    def forward_diffusion_process(self, z0, noise = None, t = None):
+    def forward_diffusion_process(self, z0, noise = None, t = None) -> torch.from_numpy:
         if noise is None:
             noise = torch.randn(z0.shape, dtype=z0.dtype, device=z0.device)
         
         if t is None:
             t = torch.full((z0.size(0), ), self.scheduler.timesteps[0], dtype=torch.long, device=z0.device)
             
-        xT = self.scheduler.add_noise(z0, noise, t)
-        
-        return xT
+        zT = self.scheduler.add_noise(z0, noise, t)
     
-    def reverse_diffusion_process(self):
-        pass
+        return zT
+    
+    def reverse_diffusion_process(self, zT = None, shape = None, unet_input = None, prompt_embeds = None) -> torch.from_numpy:
+        if zT is None:
+            zT = torch.randn(shape, dtype=torch.float32).cuda()
+                
+        if unet_input is None:
+            unet_shape = (shape[0], self.in_channels - zT.size(1), shape[2], shape[3])
+            unet_input = torch.randn(unet_shape, dtype=zT.dtype).cuda()
+            
+        if prompt_embeds is None:
+            prompt_embeds = self.encode_prompt(["" * shape[0]])
+            
+        pred_z0 = zT
+        self.scheduler.set_timesteps(self.num_inference_steps, zT.device)
+        for t in self.scheduler.timesteps:
+            
+            input = torch.cat([pred_z0, unet_input], 1)
+            # 1. predict noise model_output
+            model_output = self.unet(input, t, prompt_embeds).sample
+
+            # 2. compute previous image: x_t -> x_t-1
+            pred_z0 = self.scheduler.step(model_output, t, pred_z0).prev_sample
+        
+        return pred_z0
+    
+    def forward(self, latent, unet_input, noise, encoder_hidden_states):
+        t = torch.randint(0, len(self.scheduler.timesteps), (latent.size(0), ), dtype=torch.long, device=latent.device)
+        zt = self.forward_diffusion_process(latent, noise, t)
+        zt = torch.cat([zt, unet_input], 1)
+        
+        rec_sample = self.unet(zt, t, encoder_hidden_states).sample
+        
+        return rec_sample
+    
+    def warping_cloth(self, batch):
+        cloth = batch["cloth"]
+        im_mask = batch["im_mask"]
+        pose_map = batch["pose_map"]
+        # TPS parameters prediction
+        # For sake of performance, the TPS parameters are predicted on a low resolution image
+        low_cloth = transforms.functional.resize(cloth, (256, 192),
+                                                 transforms.InterpolationMode.BILINEAR,
+                                                 antialias=True)
+        low_im_mask = transforms.functional.resize(im_mask, (256, 192),
+                                                   transforms.InterpolationMode.BILINEAR,
+                                                   antialias=True)
+        low_pose_map = transforms.functional.resize(pose_map, (256, 192),
+                                                    transforms.InterpolationMode.BILINEAR,
+                                                    antialias=True)
+        agnostic = torch.cat([low_im_mask, low_pose_map], 1)
+        low_grid, _, _, _, _, _, _, _ = self.tps(low_cloth, agnostic)
+
+        # We upsample the grid to the original image size and warp the cloth using the predicted TPS parameters
+        highres_grid = transforms.functional.resize(low_grid.permute(0, 3, 1, 2), size=(cloth.size(2), cloth.size(3)), 
+                               interpolation=transforms.InterpolationMode.BILINEAR, antialias=True).permute(0, 2, 3, 1)
+
+        warped_cloth = nn.functional.grid_sample(cloth, highres_grid, padding_mode='border', align_corners=True)
+        
+        if self.cloth_refinement:
+            # Refine the warped cloth using the refinement network
+            warped_cloth = torch.cat([im_mask, pose_map, warped_cloth], 1)
+            warped_cloth = self.refinement(warped_cloth)
+            warped_cloth = warped_cloth.clamp(-1, 1)
+            warped_cloth = warped_cloth
+        
+        return warped_cloth
+    
+    def get_warped_cloth(self, batch):
+        warped_cloth = batch.get("warped_cloth")
+        
+        if warped_cloth is None:
+            if self.cloth_warpping:
+                warped_cloth = self.warping_cloth(batch)
+            else:
+                warped_cloth = batch.get("cloth")
+        
+        return warped_cloth
     
     def get_input(self, batch, num_sampling = None):
         I = batch["image"]
@@ -655,7 +680,6 @@ class frido(Module_base):
         m = batch["inpaint_mask"].to(torch.float32)
         p = batch["pose_map"]
         C_W = self.get_warped_cloth(batch)
-        captions = batch["captions"]
         
         if num_sampling is not None:
             I = I[:num_sampling]
@@ -664,22 +688,27 @@ class frido(Module_base):
             m = m[:num_sampling]
             p = p[:num_sampling]
             C_W = C_W[:num_sampling]
-            captions = captions[:num_sampling]
-                
+        
         m = nn.functional.interpolate(m, size=(m.shape[2] // 8, m.shape[3] // 8), mode="bilinear")
         p = nn.functional.interpolate(p, size=(p.shape[2] // 8, p.shape[3] // 8), mode="bilinear")
-        latent = self.encode(I)
-        C_W = self.vae.encode(C_W)
-        I_M = self.vae.encoder(I_M)[0]
+        latent = self.vae.encode(I).latent_dist.sample() * self.vae.config.scaling_factor
+        C_W = self.vae.encode(C_W).latent_dist.sample() * self.vae.config.scaling_factor
+        I_M = self.vae.encode(I_M).latent_dist.sample() * self.vae.config.scaling_factor
         
         unet_input = torch.cat([m, p, C_W, I_M], 1)
         noise = torch.randn(latent.shape, dtype=torch.float32).cuda()
-        encoder_hidden_states = self.encode_prompt(captions)
+        encoder_hidden_states = self.encode_prompt(batch["captions"])
         
         return latent, unet_input, noise, encoder_hidden_states
     
     def get_loss(self, batch):
-        pass
+        latent, unet_input, noise, encoder_hidden_states = self.get_input(batch)
+        # denoising을 전체적으로? 아님 z만? -> z만
+        unet_output = self(latent, unet_input, noise, encoder_hidden_states)
+        
+        loss = self.criterion(noise, unet_output)
+        
+        return {"total": loss}
         
     def inference(self):
         pass
@@ -696,14 +725,29 @@ class frido(Module_base):
 
         return encoder_hidden_states
  
-    def get_image_log(self):
-        pass
-    
+    def get_image_log(self, batch, num_sampling):
+        z0, unet_input, noise, encoder_hidden_states = self.get_input(batch, num_sampling)
+        
+        if self.img2img:
+            zT = self.forward_diffusion_process(z0, noise)
+        else:
+            zT = None
+            
+        z0_pred = self.reverse_diffusion_process(zT=zT, 
+                                                 shape=z0.shape,
+                                                 unet_input=unet_input,
+                                                 prompt_embeds=encoder_hidden_states)
+        
+        x0_pred = self.vae.decode(z0_pred).sample
+
+        return {"real": batch["image"],
+                "fake": x0_pred}
+        
     def save_model(self):
         torch.save(self.unet.state_dict(), self.model_path)
         
     def configure_optimizers(self, lr):
-        optim = self.optimizer(self(), lr)
+        optim = self.optimizer(self.unet.parameters(), lr)
         
         lambda2 = lambda epoch: 0.95 ** epoch
         
@@ -713,3 +757,4 @@ class frido(Module_base):
         schedulers = [scheduler]
         
         return optimizers, schedulers
+    
