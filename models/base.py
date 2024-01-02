@@ -101,12 +101,13 @@ class Lit_base(pl.LightningModule):
         return inputs
     
     def sampling(self, batch, prefix="train"):
-        outputs = self.model.get_image_log(batch, self.num_sampling)
+        with torch.no_grad():
+            outputs = self.model.get_image_log(batch, self.num_sampling)
         
-        output_grids = self.get_grid(outputs)
-        
-        for key in output_grids:
-            self.logger.experiment.add_image(f'{prefix}/{key}', output_grids[key], self.current_epoch)
+            output_grids = self.get_grid(outputs)
+            
+            for key in output_grids:
+                self.logger.experiment.add_image(f'{prefix}/{key}', output_grids[key], self.current_epoch)
                 
     def logging_output(self, batch, prefix="train"):
         if self.global_rank == 0:

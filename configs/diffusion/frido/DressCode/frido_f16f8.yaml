@@ -1,7 +1,7 @@
 model:
   target: models.base.Lit_base
   params:
-    lr: 1.e-6
+    lr: 0.0001
     sampling_step: 5
     num_sampling: 20
     model_config:
@@ -9,10 +9,8 @@ model:
       params:
         optim_target: torch.optim.adamw.AdamW
         num_inference_steps: 50
-        cloth_warpping: False
-        cloth_refinement: False
         img2img: False
-        model_path: checkpoints/diffusion/frido/msvqgan/DressCode/frido_f16f8.ckpt
+        model_path: checkpoints/diffusion/frido/frido/DressCode/frido_f16f8.ckpt
         criterion_config:
           target: torch.nn.MSELoss
         scheduler_config:
@@ -85,11 +83,11 @@ model:
             num_head_channels: 32
             use_spatial_transformer: true
             transformer_depth: 1
-            context_dim: 640
+            context_dim: 768
             num_stage: 2
 
 logger:
-  logger_path: checkpoints/diffusion/frido/msvqgan/DressCode
+  logger_path: checkpoints/diffusion/frido/frido/DressCode
     
 lightning:
   trainer:
@@ -97,18 +95,18 @@ lightning:
     # precision: 16-mixed
     max_epochs: 100000
     sync_batchnorm: True
-    devices: [0]
-  earlystop_params:
-    monitor: val/total_loss
-    mode: min
-  monitor_params:
-    logging_interval: step
+    # devices: [0]
+  # earlystop_params:
+  #   monitor: val/total_loss
+  #   mode: min
+  # monitor_params:
+  #   logging_interval: step
 
 dataset:
-  height: &height 512
-  width: &width 384
+  height: &height 256
+  width: &width 192
   num_workers: 6
-  batch_size: 2
+  batch_size: 32
   train:
     target: &data_target dataloader.dresscode.DressCodeDataset
     params:
