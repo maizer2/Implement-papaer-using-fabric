@@ -10,12 +10,13 @@ from torch.optim.lr_scheduler import LambdaLR
 from torchvision.utils import make_grid
 from torchvision import transforms
 
-from diffusers import UNet2DConditionModel, StableDiffusionInpaintPipeline
+from diffusers import UNet2DConditionModel, StableDiffusionInpaintPipeline, DDIMScheduler
 from transformers import CLIPTextModel, CLIPTokenizer, CLIPVisionModelWithProjection, AutoProcessor
 
 from models.VITON.ladi_vton.models.inversion_adapter import InversionAdapter
 from models.VITON.ladi_vton.utils.encode_text_word_embedding import encode_text_word_embedding
 
+from models.pipeline.ladi_vton_pipeline import StableDiffusionTryOnePipeline
 from run import instantiate_from_config, get_obj_from_str
 
 from models.base import Module_base
@@ -172,7 +173,22 @@ class cp_vton(Module_base):
         schedulers = [scheduler]
         
         return optimizers, schedulers
-    
+
+class ladi_vton(Module_base):
+    def __init__(self,
+                 optim_target: tuple,
+                 criterion_config: tuple,
+                 dataset_name: str = "vitonhd", # ["vitonhd", "dresscode"]
+                 scheduler_config: dict = None,
+                 in_channels: int = 31,
+                 num_inference_steps = 50,
+                 model_path = None):
+        super().__init__(optim_target, criterion_config, model_path)
+        self.tps, self.refinement = torch.hub.load(repo_or_dir='miccunifi/ladi-vton', source='github', model='warping_module', 
+                                                   dataset=dataset_name)
+        self.scheduler = DDIMScheduler.from_pretrained("stabilityai/stable-diffusion-2-inpainting", subfolder="scheduler")
+        self.tokenizer = CLIPTokenizer.from_pretrained("stabilityai/stable-diffusion-2-inpainting", subfolder="tokenizer")
+        
 class ladi_vton(Module_base):
     def __init__(self,
                  optim_target: tuple,
@@ -189,9 +205,7 @@ class ladi_vton(Module_base):
                  cloth_refinement = False,
                  use_emasc = False,
                  model_path = None):
-        super().__init__(model_path)
-        self.optimizer = get_obj_from_str(optim_target)
-        self.criterion = instantiate_from_config(criterion_config)
+        super().__init__(optim_target, criterion_config, model_path)
         
         self.stage = stage
         self.dataset_name = dataset_name
@@ -537,9 +551,7 @@ class custom_vton(Module_base):
                  img2img: bool = False,
                  model_path: str = None
                  ):
-        super().__init__(model_path)
-        self.optimizer = get_obj_from_str(optim_target)
-        self.criterion = instantiate_from_config(criterion_config)
+        super().__init__(optim_target, criterion_config, model_path)
         
         self.in_channels = in_channels
         self.num_inference_steps = num_inference_steps
@@ -739,6 +751,325 @@ class custom_vton(Module_base):
                                                  prompt_embeds=encoder_hidden_states)
         
         x0_pred = self.vae.decode(z0_pred).sample
+
+        return {"real": batch["image"],
+                "fake": x0_pred}
+        
+    def save_model(self):
+        torch.save(self.unet.state_dict(), self.model_path)
+        
+    def configure_optimizers(self, lr):
+        optim = self.optimizer(self.unet.parameters(), lr)
+        
+        lambda2 = lambda epoch: 0.95 ** epoch
+        
+        scheduler = LambdaLR(optim, lambda2)
+        
+        optimizers = [optim]
+        schedulers = [scheduler]
+        
+        return optimizers, schedulers
+    
+class master_thesis(Module_base):
+    def __init__(self, 
+                 optim_target: str,
+                 criterion_config: tuple,
+                 scheduler_config: tuple,
+                 dataset_name: str, # ["vitonhd", "dresscode"]
+                 in_channels: int = 31,
+                 emasc_int_layers: list = [1, 2, 3, 4, 5],
+                 num_vstar: int = 16,
+                 num_inference_steps: int = 50,
+                 cloth_warpping: bool = False,
+                 cloth_refinement: bool = False,
+                 img2img: bool = False,
+                 model_path: str = None
+                 ):
+        super().__init__(optim_target, criterion_config, model_path)
+        self.optimizer = get_obj_from_str(optim_target)
+        self.criterion = instantiate_from_config(criterion_config)
+        
+        self.in_channels = in_channels
+        self.emasc_int_layers = emasc_int_layers
+        self.num_vstar = num_vstar
+        self.num_inference_steps = num_inference_steps
+        self.cloth_warpping = cloth_warpping
+        self.cloth_refinement = cloth_refinement
+        self.img2img = img2img
+        
+        self.vision_encoder = CLIPVisionModelWithProjection.from_pretrained("laion/CLIP-ViT-H-14-laion2B-s32B-b79K")
+        self.processor = AutoProcessor.from_pretrained("laion/CLIP-ViT-H-14-laion2B-s32B-b79K")
+        self.tokenizer = CLIPTokenizer.from_pretrained("stabilityai/stable-diffusion-2-inpainting", subfolder="tokenizer")
+        self.text_encoder = CLIPTextModel.from_pretrained("stabilityai/stable-diffusion-2-inpainting", subfolder="text_encoder")
+        
+        from models.Diffusion.ladi_vton.models.autoencoder_kl import AutoencoderKL
+        self.vae = AutoencoderKL.from_pretrained("stabilityai/stable-diffusion-2-inpainting", subfolder="vae")
+        self.unet = torch.hub.load(repo_or_dir='miccunifi/ladi-vton', source='github', model='extended_unet',
+                                   dataset=dataset_name)
+        self.emasc = torch.hub.load(repo_or_dir='miccunifi/ladi-vton', source='github', model='emasc', 
+                                    dataset=dataset_name)
+        self.inversion_adapter = torch.hub.load(repo_or_dir='miccunifi/ladi-vton', source='github', model='inversion_adapter',
+                                                dataset=dataset_name)
+        self.tps, self.refinement = torch.hub.load(repo_or_dir='miccunifi/ladi-vton', source='github', model='warping_module',
+                                                   dataset=dataset_name)
+        # self.scheduler = instantiate_from_config(scheduler_config)
+        self.scheduler = DDIMScheduler.from_pretrained("stabilityai/stable-diffusion-2-inpainting", subfolder="scheduler")
+
+        self.pipeline = StableDiffusionTryOnePipeline(
+            text_encoder=self.text_encoder,
+            vae=self.vae,
+            tokenizer=self.tokenizer,
+            unet=self.unet,
+            scheduler=self.scheduler,
+            emasc=self.emasc,
+            emasc_int_layers=emasc_int_layers,
+        )
+        
+        # if os.path.exists(model_path):
+        #     self.unet.load_state_dict(torch.load(model_path))
+
+        model_eval([self.tps, self.refinement, self.inversion_adapter, self.emasc, self.vae, 
+                    self.text_encoder, self.vision_encoder, 
+                    self.unet
+                    ])
+        
+    def forward_diffusion_process(self, z0, noise = None, t = None) -> torch.from_numpy:
+        if noise is None:
+            noise = torch.randn(z0.shape, dtype=z0.dtype, device=z0.device)
+        
+        if t is None:
+            t = torch.full((z0.size(0), ), self.scheduler.timesteps[0], dtype=torch.long, device=z0.device)
+            
+        zT = self.scheduler.add_noise(z0, noise, t)
+    
+        return zT
+    
+    def reverse_diffusion_process(self, zT = None, shape = None, unet_input = None, encoder_hidden_states = None, category = None) -> torch.from_numpy:
+        if zT is None:
+            zT = torch.randn(shape, dtype=torch.float32).cuda()
+                
+        if unet_input is None:
+            unet_shape = (shape[0], self.in_channels - zT.size(1), shape[2], shape[3])
+            unet_input = torch.randn(unet_shape, dtype=zT.dtype).cuda()
+            
+        if encoder_hidden_states is None:
+            encoder_hidden_states = self.get_encoder_hidden_states(category=category)
+            
+        pred_z0 = zT
+        self.scheduler.set_timesteps(self.num_inference_steps, zT.device)
+        for t in self.scheduler.timesteps:
+            
+            pred_z0 = self.scheduler.scale_model_input(pred_z0, t)
+            input = torch.cat([pred_z0, unet_input], 1)
+            # 1. predict noise model_output
+            model_output = self.unet(input, t, encoder_hidden_states).sample
+
+            # 2. compute previous image: x_t -> x_t-1
+            pred_z0 = self.scheduler.step(model_output, t, pred_z0).prev_sample
+        
+        return pred_z0
+    
+    def forward(self, latent, unet_input, noise, encoder_hidden_states):
+        t = torch.randint(0, len(self.scheduler.timesteps), (latent.size(0), ), dtype=torch.long, device=latent.device)
+        zt = self.forward_diffusion_process(latent, noise, t)
+        zt = torch.cat([zt, unet_input], 1)
+        
+        rec_sample = self.unet(zt, t, encoder_hidden_states).sample
+        
+        return rec_sample
+    
+    def warping_cloth(self, batch):
+        cloth = batch["cloth"]
+        im_mask = batch["im_mask"]
+        pose_map = batch["pose_map"]
+        # TPS parameters prediction
+        # For sake of performance, the TPS parameters are predicted on a low resolution image
+        low_cloth = transforms.functional.resize(cloth, (256, 192),
+                                                 transforms.InterpolationMode.BILINEAR,
+                                                 antialias=True)
+        low_im_mask = transforms.functional.resize(im_mask, (256, 192),
+                                                   transforms.InterpolationMode.BILINEAR,
+                                                   antialias=True)
+        low_pose_map = transforms.functional.resize(pose_map, (256, 192),
+                                                    transforms.InterpolationMode.BILINEAR,
+                                                    antialias=True)
+        agnostic = torch.cat([low_im_mask, low_pose_map], 1)
+        low_grid, _, _, _, _, _, _, _ = self.tps(low_cloth, agnostic)
+
+        # We upsample the grid to the original image size and warp the cloth using the predicted TPS parameters
+        highres_grid = transforms.functional.resize(low_grid.permute(0, 3, 1, 2), size=(cloth.size(2), cloth.size(3)), 
+                               interpolation=transforms.InterpolationMode.BILINEAR, antialias=True).permute(0, 2, 3, 1)
+
+        warped_cloth = nn.functional.grid_sample(cloth, highres_grid, padding_mode='border', align_corners=True)
+        
+        if self.cloth_refinement:
+            # Refine the warped cloth using the refinement network
+            warped_cloth = torch.cat([im_mask, pose_map, warped_cloth], 1)
+            warped_cloth = self.refinement(warped_cloth)
+            warped_cloth = warped_cloth.clamp(-1, 1)
+            warped_cloth = warped_cloth
+        
+        return warped_cloth
+    
+    def get_warped_cloth(self, batch):
+        warped_cloth = batch.get("warped_cloth")
+        
+        if warped_cloth is None:
+            if self.cloth_warpping:
+                warped_cloth = self.warping_cloth(batch)
+            else:
+                warped_cloth = batch.get("cloth")
+        
+        return warped_cloth
+    
+    def get_input(self, batch, num_sampling = None, inference = False):
+        I = batch["image"]
+        C = batch["cloth"]
+        I_M = batch["im_mask"]
+        m = batch["inpaint_mask"].to(torch.float32)
+        p = batch["pose_map"]
+        C_W = self.get_warped_cloth(batch)
+        text = batch["captions"]
+        category = batch["category"]
+        
+        if num_sampling is not None:
+            I = I[:num_sampling]
+            C = C[:num_sampling]
+            I_M = I_M[:num_sampling]
+            m = m[:num_sampling]
+            p = p[:num_sampling]
+            C_W = C_W[:num_sampling]
+            text = text[:num_sampling]
+            category = category[:num_sampling]
+        
+        m = nn.functional.interpolate(m, size=(m.shape[2] // 8, m.shape[3] // 8), mode="bilinear")
+        p = nn.functional.interpolate(p, size=(p.shape[2] // 8, p.shape[3] // 8), mode="bilinear")
+        latent = self.vae.encode(I)[0].latent_dist.sample() * self.vae.config.scaling_factor
+        C_W = self.vae.encode(C_W)[0].latent_dist.sample() * self.vae.config.scaling_factor
+        I_M, I_M_intermediate_features = self.vae.encode(I_M)
+        I_M = I_M.latent_dist.sample() * self.vae.config.scaling_factor
+        
+        unet_input = torch.cat([m, p, C_W, I_M], 1)
+        noise = torch.randn(latent.shape, dtype=torch.float32).cuda()
+        # encoder_hidden_states = self.get_encoder_hidden_states(C, text, category)
+        encoder_hidden_states = self.get_encoder_hidden_states(C, None, category)
+        
+        if inference:
+            I_M_intermediate_features = [I_M_intermediate_features[i] for i in self.emasc_int_layers]
+            I_M_intermediate_features = self.get_intermediate_features(I_M_intermediate_features)
+            I_M_intermediate_features = self.mask_features(I_M_intermediate_features, batch["inpaint_mask"].to(torch.float32))
+        
+        return latent, unet_input, noise, encoder_hidden_states, I_M_intermediate_features
+    
+    def get_loss(self, batch):
+        latent, unet_input, noise, encoder_hidden_states, _ = self.get_input(batch)
+        # denoising을 전체적으로? 아님 z만? -> z만
+        unet_output = self(latent, unet_input, noise, encoder_hidden_states)
+        
+        loss = self.criterion(noise, unet_output)
+        
+        return {"total": loss}
+    
+    def inference(self, batch, num_sampling):
+        z0, unet_input, noise, encoder_hidden_states, I_M_intermediate_features = self.get_input(batch, num_sampling, True)
+              
+        # if self.img2img:
+        #     zT = self.forward_diffusion_process(z0, noise)
+        # else:
+        #     zT = None
+        
+        # z0_pred = self.reverse_diffusion_process(zT=zT, 
+        #                                          shape=z0.shape,
+        #                                          unet_input=unet_input,
+        #                                          encoder_hidden_states=encoder_hidden_states)
+        
+        # z0_pred = 1 / self.vae.config.scaling_factor * z0_pred
+        # x0_pred = self.vae.decode(z0_pred, I_M_intermediate_features, self.emasc_int_layers).sample
+        x0_pred = self.pipeline(image=batch["image"],
+                                mask_image=batch["inpaint_mask"].to(torch.float32),
+                                pose_map=batch["pose_map"],
+                                warped_cloth=batch["warped_cloth"],
+                                prompt_embeds=encoder_hidden_states,
+                                height=512,
+                                width=384,
+                                guidance_scale=7.5,
+                                num_images_per_prompt=1,
+                                cloth_input_type='warped',
+                                num_inference_steps=50
+                                ).images
+        return x0_pred
+    
+    def mask_features(self, features: list, mask: torch.Tensor):
+        """
+        Mask features with the given mask.
+        """
+
+        for i, feature in enumerate(features):
+            # Resize the mask to the feature size.
+            mask = torch.nn.functional.interpolate(mask, size=feature.shape[-2:])
+
+            # Mask the feature.
+            features[i] = feature * (1 - mask)
+
+        return features
+
+    def get_intermediate_features(self, intermediate_features):
+        intermediate_features = self.emasc(intermediate_features)
+        
+        return intermediate_features
+    
+    def get_word_embedding(self, cloth):
+        # Get the visual features of the in-shop cloths
+        # (bsz, 3, 224, 224)
+        input_image = transforms.functional.resize((cloth + 1) / 2, (224, 224), antialias=True).clamp(0, 1)
+        # (bsz, 3, 224, 224)
+        processed_images = self.processor(images=input_image, return_tensors="pt", do_rescale=False)
+        # (bsz, 257, 1280)
+        clip_cloth_features = self.vision_encoder(processed_images.pixel_values.cuda()).last_hidden_state
+        # Compute the predicted PTEs
+        # (bsz, 16384)
+        word_embeddings = self.inversion_adapter(clip_cloth_features)
+        # (bsz, 16, 1024)
+        word_embeddings = word_embeddings.reshape((word_embeddings.shape[0], self.num_vstar, -1))
+        
+        return word_embeddings
+    
+    def get_tokenized_text(self, text = None, category = None):
+        if text is None:
+            category_text = {
+                'dresses': 'a dress',
+                'upper_body': 'an upper body garment',
+                'lower_body': 'a lower body garment',
+            }
+            
+            # batch size lenght
+            text = [f'a photo of a model wearing {category_text[ctg]} {" $ " * self.num_vstar}' for
+                    ctg in category]
+        else:
+            text = [t + " $ " * self.num_vstar for t in text]
+        
+        # Tokenize text ( bsz, 77 )
+        tokenized_text = self.tokenizer(text, max_length=self.tokenizer.model_max_length, padding="max_length",
+                                        truncation=True, return_tensors="pt").input_ids.cuda()
+        
+        return tokenized_text
+    
+    def get_encoder_hidden_states(self, cloth = None, text = None, category = None):
+        if cloth is None:
+            tokenized_text = self.get_tokenized_text(text, category)
+            encoder_hidden_states = self.text_encoder(tokenized_text).last_hidden_state
+        else:
+            word_embeddings = self.get_word_embedding(cloth)
+            tokenized_text = self.get_tokenized_text(text, category)
+            
+            # Encode the text using the PTEs extracted from the in-shop cloths ( bsz, 77, 1024 )
+            encoder_hidden_states = encode_text_word_embedding(self.text_encoder, tokenized_text,
+                                                            word_embeddings, self.num_vstar).last_hidden_state
+            
+        return encoder_hidden_states
+     
+    def get_image_log(self, batch, num_sampling):
+        x0_pred = self.inference(batch, num_sampling)
 
         return {"real": batch["image"],
                 "fake": x0_pred}

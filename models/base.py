@@ -12,9 +12,13 @@ from run import instantiate_from_config, get_obj_from_str
 
 class Module_base(nn.Module):
     def __init__(self, 
+                 optim_target: tuple,
+                 criterion_config: tuple,
                  model_path: str = None
                  ):
         super().__init__()
+        self.optimizer = get_obj_from_str(optim_target)
+        self.criterion = instantiate_from_config(criterion_config)
         self.model_path = model_path
             
     def forward(self):
@@ -83,6 +87,9 @@ class Lit_base(pl.LightningModule):
     def predict(self, batch):
         x0_hat = self.model.inference(batch, self.num_sampling)
         
+        for idx, image in enumerate(x0_hat):
+            image.save(f"test_{idx}.png")
+        exit()
         return x0_hat
         
     def logging_loss(self, losses: Dict[str, int], prefix):

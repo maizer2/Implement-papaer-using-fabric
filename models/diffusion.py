@@ -916,9 +916,7 @@ class frido(Module_base):
                  img2img: bool = False,
                  model_path: str = None
                  ):
-        super().__init__(model_path)
-        self.optimizer = get_obj_from_str(optim_target)
-        self.criterion = instantiate_from_config(criterion_config)
+        super().__init__(optim_target, criterion_config, model_path)
         
         self.num_inference_steps = num_inference_steps
         self.img2img = img2img
