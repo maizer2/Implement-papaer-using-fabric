@@ -1,0 +1,83 @@
+model:
+  target: models.base.Lit_base
+  params:
+    lr: 1e-4
+    sampling_step: 5
+    num_sampling: 20
+    model_config:
+      target: models.vton.custom_ladi_vton
+      params:
+        optim_target: torch.optim.adamw.AdamW
+        criterion_config:
+          target: torch.nn.MSELoss
+        dataset_name: dresscode
+        in_channels: 31
+        num_inference_steps: 50
+        conditioning_scale: 1.0
+        num_vstar: 16
+        use_caption: False
+        cloth_warpping: True
+        cloth_refinement: True
+        use_controlnet: False
+        model_path: checkpoints/viton/custom_ladi_vton/DressCode/unet.ckpt
+
+logger:
+  logger_path: checkpoints/viton/custom_ladi_vton/DressCode/tryon
+    
+lightning:
+  trainer:
+    strategy: ddp_find_unused_parameters_True
+    # precision: 16-mixed
+    max_epochs: 100000
+    sync_batchnorm: True
+    # devices: [0]
+  earlystop_params:
+    monitor: val/total_loss
+    mode: min
+  monitor_params:
+    logging_interval: step
+
+dataset:
+  height: &height 512
+  width: &width 384
+  num_workers: 6
+  batch_size: 8
+  train:
+    target: &data_target dataloader.dresscode.DressCodeDataset
+    params:
+      size: [*height, *width]
+      dataroot_path: &dataroot_path data/DressCode
+      phase: train
+      category: &data_category
+      - upper_body
+      - lower_body
+      - dresses
+      outputlist: &data_outputlist
+      - c_name
+      - im_name
+      - image
+      - cloth
+      - inpaint_mask
+      - pose_map
+      - im_head
+      - im_pose
+      - im_cloth
+      - category
+      - im_mask
+  val:
+    target: *data_target
+    params:
+      size: [*height, *width]
+      dataroot_path: *dataroot_path
+      phase: val
+      category: *data_category
+      outputlist: *data_outputlist
+  test:
+    target: *data_target
+    params:
+      size: [*height, *width]
+      phase: test
+      order: paired
+      dataroot_path: *dataroot_path
+      category: *data_category
+      outputlist: *data_outputlist
