@@ -13,12 +13,13 @@ import PIL
 import torch
 from diffusers.configuration_utils import FrozenDict
 from diffusers.models import AutoencoderKL, UNet2DConditionModel
-from diffusers.pipeline_utils import DiffusionPipeline
+from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 from diffusers.pipelines.stable_diffusion import StableDiffusionPipelineOutput
 from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_inpaint import prepare_mask_and_masked_image
 from diffusers.schedulers import DDIMScheduler, LMSDiscreteScheduler, PNDMScheduler
-from diffusers.utils import deprecate
-from diffusers.utils import is_accelerate_available, randn_tensor
+from diffusers.utils import is_accelerate_available
+from diffusers.utils import USE_PEFT_BACKEND, deprecate, logging, scale_lora_layers, unscale_lora_layers
+from diffusers.utils.torch_utils import randn_tensor
 from packaging import version
 from transformers import CLIPTextModel, CLIPTokenizer
 from ..Diffusion.ladi_vton.utils.data_utils import mask_features
@@ -54,17 +55,17 @@ class StableDiffusionTryOnePipeline(DiffusionPipeline):
     _optional_components = ["safety_checker"]
 
     def __init__(
-            self,
-            vae: AutoencoderKL,
-            text_encoder: CLIPTextModel,
-            tokenizer: CLIPTokenizer,
-            unet: UNet2DConditionModel,
-            scheduler: Union[DDIMScheduler, PNDMScheduler, LMSDiscreteScheduler],
-            safety_checker=None,
-            feature_extractor=None,
-            requires_safety_checker: bool = False,
-            emasc=None,
-            emasc_int_layers=None
+        self,
+        vae: AutoencoderKL,
+        text_encoder: CLIPTextModel,
+        tokenizer: CLIPTokenizer,
+        unet: UNet2DConditionModel,
+        scheduler: Union[DDIMScheduler, PNDMScheduler, LMSDiscreteScheduler],
+        safety_checker=None,
+        feature_extractor=None,
+        requires_safety_checker: bool = False,
+        emasc=None,
+        emasc_int_layers=None
     ):
         super().__init__()
 

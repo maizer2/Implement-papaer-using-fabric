@@ -3,9 +3,9 @@ from typing import Optional, Union, List, Tuple, Dict, Any
 
 import torch
 import torch.nn as nn
-from torch.optim.adam import Adam
 import lightning.pytorch as pl
 
+from torchvision.transforms import ToPILImage
 from torchvision.utils import make_grid
 
 from run import instantiate_from_config, get_obj_from_str
@@ -88,6 +88,8 @@ class Lit_base(pl.LightningModule):
         x0_hat = self.model.inference(batch, self.num_sampling)
         
         for idx, image in enumerate(x0_hat):
+            image = (image/ 2 + 0.5).clamp(0, 1)
+            image = ToPILImage()(image)
             image.save(f"test_{idx}.png")
         exit()
         return x0_hat
@@ -96,14 +98,11 @@ class Lit_base(pl.LightningModule):
         for key in losses:
             self.log(f'{prefix}/{key}_loss', losses[key], prog_bar=True, sync_dist=True)
             
-    def get_grid(self, inputs: Dict[str, torch.Tensor], return_pil=False):        
+    def get_grid(self, inputs: Dict[str, torch.Tensor]):        
         for key in inputs:
             image = (inputs[key]/ 2 + 0.5).clamp(0, 1)
             
-            if return_pil:
-                inputs[key] = self.numpy_to_pil(make_grid(image))
-            else:
-                inputs[key] = make_grid(image)
+            inputs[key] = make_grid(image)
         
         return inputs
     

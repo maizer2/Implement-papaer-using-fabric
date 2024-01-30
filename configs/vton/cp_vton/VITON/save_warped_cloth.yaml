@@ -8,7 +8,7 @@ model:
     optim_name: Adam
     save_warped_cloth: True
     model_args:
-      GMM_model_path: checkpoints/viton/cp_vton/stage_1/GMM.ckpt
+      GMM_model_path: checkpoints/vton/cp_vton/stage_1/GMM.ckpt
       stage: stage_1
       GMM_config:
         target: models.VITON.cp-vton.GMM
@@ -23,7 +23,7 @@ model:
 
 
 logger:
-  logger_path: checkpoints/viton/cp_vton/stage_1
+  logger_path: checkpoints/vton/cp_vton/stage_1
     
 lightning:
   trainer:

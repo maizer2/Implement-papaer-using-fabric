@@ -5,25 +5,17 @@ model:
     sampling_step: 5
     num_sampling: 20
     model_config:
-      target: models.vton.custom_ladi_vton
+      target: models.vton.stable_diffusion_text_guided_inpainting_vton
       params:
         optim_target: torch.optim.adamw.AdamW
         criterion_config:
           target: torch.nn.MSELoss
-        dataset_name: dresscode
-        in_channels: 31
         num_inference_steps: 50
-        conditioning_scale: 1.0
-        num_vstar: 16
         use_caption: False
-        cloth_warpping: True
-        cloth_refinement: True
-        use_controlnet: True
-        use_img2img: True # False
-        model_path: checkpoints/vton/custom_ladi_vton/DressCode/unet.ckpt
+        model_path: checkpoints/vton/stable_diffusion_text_guided_inpainting_vton/DressCode/unet.ckpt
 
 logger:
-  logger_path: checkpoints/vton/custom_ladi_vton/DressCode/tryon
+  logger_path: checkpoints/vton/stable_diffusion_text_guided_inpainting_vton/DressCode/tryon
     
 lightning:
   trainer:
@@ -57,14 +49,9 @@ dataset:
       - c_name
       - im_name
       - image
-      - cloth
       - inpaint_mask
-      - pose_map
-      - im_head
-      - im_pose
-      - im_cloth
-      - category
       - im_mask
+      - category
       - captions
   val:
     target: *data_target

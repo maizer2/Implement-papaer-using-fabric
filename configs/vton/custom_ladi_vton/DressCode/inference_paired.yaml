@@ -1,46 +1,33 @@
 model:
-  target: models.viton.Lit_viton
+  target: models.base.Lit_base
   params:
     lr: 1e-4
     sampling_step: 5
     num_sampling: 20
-    optim_name: AdamW
-    model_name: ladi_vton
-    model_args:
-      stage: tryon
-      dataset_name: dresscode
-      in_channels: 31
-      num_inference_steps: 50
-      cloth_warpping: True
-      cloth_refinement: True
-      use_emasc: True
-      model_path: checkpoints/vton/ladi_vton/DressCode/unet_dresscode.ckpt
-      scheduler_config:
-        target: diffusers.schedulers.scheduling_ddim.DDIMScheduler
-        params:
-          num_train_timesteps: 1000
-      emasc_config:
-        target: models.VITON.ladi_vton.models.emasc.EMASC
-        params:
-          in_channels: [128, 128, 128, 256, 512]
-          out_channels: [128, 256, 512, 512, 512]
-          int_layers: [1, 2, 3, 4, 5]
-          kernel_size: 3
-          padding: 1
-          stride: 1
-          type: nonlinear # linear, nonlinear
-          model_path: checkpoints/vton/ladi_vton/DressCode/emasc_dresscode.pth
-      inversion_adapter_config:
-        num_encoder_layers: 1
+    model_config:
+      target: models.vton.custom_ladi_vton
+      params:
+        optim_target: torch.optim.adamw.AdamW
+        criterion_config:
+          target: torch.nn.MSELoss
+        dataset_name: dresscode
+        in_channels: 31
+        num_inference_steps: 50
+        conditioning_scale: 1.0
         num_vstar: 16
-        model_path: checkpoints/vton/ladi_vton/DressCode/inversion_adapter_dresscode.pth
+        use_caption: False
+        cloth_warpping: True
+        cloth_refinement: True
+        use_controlnet: False
+        use_img2img: True # False
+        model_path: checkpoints/vton/custom_ladi_vton/DressCode/unet.ckpt
 
 logger:
-  logger_path: checkpoints/vton/ladi_vton/DressCode/tryon
+  logger_path: checkpoints/vton/custom_ladi_vton/DressCode/tryon
     
 lightning:
   trainer:
-    strategy: ddp_find_unused_parameters_False
+    strategy: ddp_find_unused_parameters_True
     # precision: 16-mixed
     max_epochs: 100000
     sync_batchnorm: True
@@ -62,6 +49,7 @@ dataset:
       size: [*height, *width]
       dataroot_path: &dataroot_path data/DressCode
       phase: train
+      order: &order paired
       category: &data_category
       - upper_body
       - lower_body
@@ -78,12 +66,14 @@ dataset:
       - im_cloth
       - category
       - im_mask
+      - captions
   val:
     target: *data_target
     params:
       size: [*height, *width]
       dataroot_path: *dataroot_path
       phase: val
+      order: *order
       category: *data_category
       outputlist: *data_outputlist
   test:
@@ -91,7 +81,7 @@ dataset:
     params:
       size: [*height, *width]
       phase: test
-      order: paired
+      order: *order
       dataroot_path: *dataroot_path
       category: *data_category
       outputlist: *data_outputlist
