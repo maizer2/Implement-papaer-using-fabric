@@ -14,12 +14,14 @@ class Module_base(nn.Module):
     def __init__(self, 
                  optim_target: tuple,
                  criterion_config: tuple,
-                 model_path: str = None
+                 model_path: str = None,
+                 train_resume: bool = False
                  ):
         super().__init__()
         self.optimizer = get_obj_from_str(optim_target)
         self.criterion = instantiate_from_config(criterion_config)
         self.model_path = model_path
+        self.train_resume = train_resume
             
     def forward(self):
         pass
@@ -61,6 +63,10 @@ class Lit_base(pl.LightningModule):
         return optims, schedulers
     
     def training_step(self, batch, batch_idx):
+        if self.global_rank == 0:
+                if self.current_epoch == 0:
+                    self.sampling(batch)
+        exit()
         losses = self.model.get_loss(batch)
         
         self.logging_loss(losses, "train")

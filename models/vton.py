@@ -11,6 +11,7 @@ from torchvision.utils import make_grid
 from torchvision import transforms
 
 from diffusers import UNet2DConditionModel, DDIMScheduler
+from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
 from transformers import CLIPTextModel, CLIPTokenizer, CLIPVisionModelWithProjection, AutoProcessor
 
 from run import instantiate_from_config, get_obj_from_str
@@ -180,7 +181,7 @@ class stable_diffusion_text_guided_inpainting_vton(Module_base):
                  model_path = None, # .../unet.ckpt
                  train_resume: bool = False
                  ):        
-        super().__init__(optim_target, criterion_config, model_path)
+        super().__init__(optim_target, criterion_config, model_path, train_resume)
 
         self.num_inference_steps = num_inference_steps
         self.use_caption = use_caption
@@ -189,12 +190,9 @@ class stable_diffusion_text_guided_inpainting_vton(Module_base):
         self.tokenizer = CLIPTokenizer.from_pretrained("stabilityai/stable-diffusion-2-inpainting", subfolder="tokenizer")
         self.scheduler = DDIMScheduler.from_pretrained("stabilityai/stable-diffusion-2-inpainting", subfolder="scheduler")
         
-        from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
         self.vae = AutoencoderKL.from_pretrained("stabilityai/stable-diffusion-2-inpainting", subfolder="vae")
         self.unet = UNet2DConditionModel.from_pretrained("stabilityai/stable-diffusion-2-inpainting", subfolder="unet")
-        
-        if train_resume:
-            self.unet_train_resume()
+        self.unet_train_resume()
         
         eval_models = [self.text_encoder, self.vae]
         model_eval(eval_models)
@@ -203,10 +201,11 @@ class stable_diffusion_text_guided_inpainting_vton(Module_base):
         self.pipeline = pipeline.from_pretrained("stabilityai/stable-diffusion-2-inpainting")
         
     def unet_train_resume(self):
-        if os.path.exists(self.model_path) and os.path.isfile(self.model_path):
-            if self.global_rank == 0:
-                print(f"Model loaded.")
-            self.unet.load_state_dict(torch.load(self.model_path))
+        if self.train_resume:
+            if os.path.exists(self.model_path) and os.path.isfile(self.model_path):
+                if self.global_rank == 0:
+                    print(f"Model loaded.")
+                self.unet.load_state_dict(torch.load(self.model_path))
          
     def forward_diffusion_process(self, z0, noise = None, t = None) -> torch.from_numpy:
         if noise is None:
@@ -270,8 +269,9 @@ class stable_diffusion_text_guided_inpainting_vton(Module_base):
                                 num_inference_steps=self.num_inference_steps,
                                 output_type="pt"
                                 ).images
-        
-        return x0_pred
+        # re normalize
+        ## because pipeline has denormalize
+        return 2.0 * x0_pred - 1.0
     
     def get_input(self, batch, num_sampling = None):
         i = batch["image"]
