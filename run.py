@@ -98,9 +98,9 @@ if __name__ == "__main__":
     logger = TensorBoardLogger(logger_config.logger_path)
     
     callbacks = []
-    if "earlystop_params" in lightning_config:
+    if lightning_config.use_earlystop:
         callbacks.append(EarlyStopping(**lightning_config.earlystop_params))
-    if "monitor_params" in lightning_config:
+    if lightning_config.use_monitor:
         callbacks.append(LearningRateMonitor(**lightning_config.monitor_params))
         
     trainer = pl.Trainer(logger=logger, callbacks=callbacks,
