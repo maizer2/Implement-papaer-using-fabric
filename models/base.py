@@ -62,11 +62,10 @@ class Lit_base(pl.LightningModule):
         
         return optims, schedulers
     
+    def on_train_start(self) -> None:
+        self.model.training_resume()
+    
     def training_step(self, batch, batch_idx):
-        if self.global_rank == 0:
-                if self.current_epoch == 0:
-                    self.sampling(batch)
-        exit()
         losses = self.model.get_loss(batch)
         
         self.logging_loss(losses, "train")

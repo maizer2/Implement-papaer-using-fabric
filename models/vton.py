@@ -192,7 +192,6 @@ class stable_diffusion_text_guided_inpainting_vton(Module_base):
         
         self.vae = AutoencoderKL.from_pretrained("stabilityai/stable-diffusion-2-inpainting", subfolder="vae")
         self.unet = UNet2DConditionModel.from_pretrained("stabilityai/stable-diffusion-2-inpainting", subfolder="unet")
-        self.unet_train_resume()
         
         eval_models = [self.text_encoder, self.vae]
         model_eval(eval_models)
@@ -200,12 +199,11 @@ class stable_diffusion_text_guided_inpainting_vton(Module_base):
         from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_inpaint import StableDiffusionInpaintPipeline as pipeline
         self.pipeline = pipeline.from_pretrained("stabilityai/stable-diffusion-2-inpainting")
         
-    def unet_train_resume(self):
-        if self.train_resume:
-            if os.path.exists(self.model_path) and os.path.isfile(self.model_path):
-                if self.global_rank == 0:
-                    print(f"Model loaded.")
-                self.unet.load_state_dict(torch.load(self.model_path))
+    def training_resume(self):
+        # This method is executed by the pl.LightningModule.
+        if self.train_resume and os.path.exists(self.model_path) and os.path.isfile(self.model_path):
+            print("Unet loaded")
+            self.unet.load_state_dict(torch.load(self.model_path))
          
     def forward_diffusion_process(self, z0, noise = None, t = None) -> torch.from_numpy:
         if noise is None:
@@ -218,8 +216,8 @@ class stable_diffusion_text_guided_inpainting_vton(Module_base):
     
         return zT
     
-    # Not using
     def reverse_diffusion_process(self):
+        # Not using
         pass
     
     def get_loss(self, batch):
@@ -229,7 +227,6 @@ class stable_diffusion_text_guided_inpainting_vton(Module_base):
         
         return {"total": loss}
     
-    # Need to be modified
     def pre_process(self, batch, num_sampling = None, inference = False):
         x0, i_m, m, text = self.get_input(batch, num_sampling)
         
