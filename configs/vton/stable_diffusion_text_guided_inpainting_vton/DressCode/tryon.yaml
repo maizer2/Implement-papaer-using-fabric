@@ -1,9 +1,9 @@
 model:
   target: models.base.Lit_base
   params:
-    lr: 0.00000001
+    lr: 0.000001
     sampling_step: 5
-    num_sampling: 20
+    num_sampling: 5
     model_config:
       target: models.vton.stable_diffusion_text_guided_inpainting_vton
       params:
@@ -13,13 +13,13 @@ model:
         num_inference_steps: 50
         use_caption: Ture
         model_path: checkpoints/vton/stable_diffusion_text_guided_inpainting_vton/DressCode/unet.ckpt
-        train_resume: True
+        train_resume: False
 
 logger:
   logger_path: checkpoints/vton/stable_diffusion_text_guided_inpainting_vton/DressCode/tryon
     
 lightning:
-  use_earlystop: True
+  use_earlystop: False
   use_monitor: True
   earlystop_params:
     monitor: val/total_loss

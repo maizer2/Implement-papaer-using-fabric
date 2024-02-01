@@ -118,7 +118,7 @@ if __name__ == "__main__":
     else:
         loader = get_dataloader(data_config, all=True)
         
-        trainer.predict(model=model.eval(), 
+        trainer.predict(model=model, 
                         dataloaders=loader,
                         ckpt_path=opt.ckpt_path)
         

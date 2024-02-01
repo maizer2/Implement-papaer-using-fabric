@@ -268,7 +268,9 @@ class stable_diffusion_text_guided_inpainting_vton(Module_base):
                                 ).images
         # re normalize
         ## because pipeline has denormalize
-        return 2.0 * x0_pred - 1.0
+        x0_pred = 2.0 * x0_pred - 1.0
+        
+        return image, x0_pred
     
     def get_input(self, batch, num_sampling = None):
         i = batch["image"]
@@ -318,14 +320,13 @@ class stable_diffusion_text_guided_inpainting_vton(Module_base):
         return encoder_hidden_states
      
     def get_image_log(self, batch, num_sampling):
-        x0_pred = self.inference(batch, num_sampling)
+        real, fake = self.inference(batch, num_sampling)
 
-        return {"real": batch["image"],
-                "fake": x0_pred}
+        return {"real": real,
+                "fake": fake}
         
     def save_model(self):
-        if self.global_rank == 0:
-            torch.save(self.unet.state_dict(), self.model_path)
+        torch.save(self.unet.state_dict(), self.model_path)
         
     def configure_optimizers(self, lr):
         optim = self.optimizer(self.unet.parameters(), lr)
