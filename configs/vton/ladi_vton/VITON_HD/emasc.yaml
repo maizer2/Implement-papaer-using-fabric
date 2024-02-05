@@ -44,10 +44,10 @@ dataset:
   num_workers: 6
   batch_size: 8
   train:
-    target: &data_target dataloader.viton.VitonDataset
+    target: &data_target dataloader.vitonhd.VitonHDDataset
     params:
       size: [*height, *width]
-      dataroot_path: &dataroot_path data/VITON
+      dataroot_path: &dataroot_path data/VITON_HD
       phase: train
       category: &data_category
       - upper_body
