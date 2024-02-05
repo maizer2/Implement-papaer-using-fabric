@@ -25,8 +25,6 @@ def get_opt():
                         help="When inferring the model")
     parser.add_argument("--config", type=str, required=True,
                         help="Path of model config file.")
-    parser.add_argument("--ckpt_path", type=str,
-                        help="Path of ckpt.")
     
     opt = parser.parse_args()
     return opt
@@ -91,8 +89,6 @@ if __name__ == "__main__":
     
     model_config, logger_config, lightning_config, data_config = get_config(opt)
     
-    train_loader, val_loader, test_loader = get_dataloader(data_config)
-    
     model = instantiate_from_config(model_config)
     
     logger = TensorBoardLogger(logger_config.logger_path)
@@ -102,23 +98,25 @@ if __name__ == "__main__":
         callbacks.append(EarlyStopping(**lightning_config.earlystop_params))
     if lightning_config.use_monitor:
         callbacks.append(LearningRateMonitor(**lightning_config.monitor_params))
-        
+    
     trainer = pl.Trainer(logger=logger, callbacks=callbacks,
-                         **lightning_config.trainer)
+                            **lightning_config.trainer)
     
     if not opt.inference:
+        train_loader, val_loader, test_loader = get_dataloader(data_config)
+        
         trainer.fit(model=model,
                     train_dataloaders=train_loader,
                     val_dataloaders=val_loader,
-                    ckpt_path=opt.ckpt_path)
+                    ckpt_path=lightning_config.fit.ckpt_path)
         
-    #     trainer.test(model=model,
-    #                  dataloaders=test_loader)
+        # trainer.test(model=model,
+        #              dataloaders=test_loader)
         
     else:
-        loader = get_dataloader(data_config, all=True)
+        data_loaders = get_dataloader(data_config, all=True)
         
         trainer.predict(model=model, 
-                        dataloaders=loader,
-                        ckpt_path=opt.ckpt_path)
+                        dataloaders=data_loaders,
+                        ckpt_path=lightning_config.fit.ckpt_path)
         

@@ -1,48 +1,48 @@
 model:
   target: models.base.Lit_base
   params:
-    lr: 1.e-6
+    lr: 0.000001
     sampling_step: 5
-    num_sampling: 20
+    num_sampling: 5
     model_config:
-      target: models.vton.master_thesis
+      target: models.vton.stable_diffusion_text_guided_inpainting_vton_with_controlnet
       params:
         optim_target: torch.optim.adamw.AdamW
-        dataset_name: dresscode
-        in_channels: 31
-        num_inference_steps: 50
-        cloth_warpping: False
-        cloth_refinement: True
-        img2img: False
-        model_path: checkpoints/vton/master_thesis/DressCode/unet.ckpt
         criterion_config:
           target: torch.nn.MSELoss
-        scheduler_config:
-          target: diffusers.schedulers.scheduling_ddim.DDIMScheduler
-          params:
-            num_train_timesteps: 1000
+        num_inference_steps: 50
+        use_caption: Ture
+        use_cloth_warpping: True
+        use_cloth_refinemnet: False
+        conditioning_scale: 1.0
+        model_path: checkpoints/vton/stable_diffusion_text_guided_inpainting_vton_with_controlnet/DressCode/unet.ckpt
+        train_resume: False
 
 logger:
-  logger_path: checkpoints/vton/master_thesis/DressCode/
+  logger_path: checkpoints/vton/stable_diffusion_text_guided_inpainting_vton_with_controlnet/DressCode/tryon
     
 lightning:
-  trainer:
-    strategy: ddp_find_unused_parameters_True
-    # precision: 16-mixed
-    max_epochs: 100000
-    sync_batchnorm: True
-    devices: [0]
+  use_earlystop: False
+  use_monitor: True
   earlystop_params:
     monitor: val/total_loss
     mode: min
   monitor_params:
     logging_interval: step
+  trainer:
+    strategy: ddp_find_unused_parameters_True
+    # precision: 16-mixed
+    max_epochs: 100000
+    sync_batchnorm: True
+    # devices: [0]
+  fit:
+    ckpt_path: 
 
 dataset:
   height: &height 512
   width: &width 384
   num_workers: 6
-  batch_size: 2
+  batch_size: 16
   train:
     target: &data_target dataloader.dresscode.DressCodeDataset
     params:
@@ -54,15 +54,13 @@ dataset:
       - lower_body
       - dresses
       outputlist: &data_outputlist
+      - c_name
       - im_name
       - image
-      - cloth
-      - im_mask
       - inpaint_mask
-      - pose_map
-      - captions
+      - im_mask
       - category
-      - warped_cloth
+      - captions
   val:
     target: *data_target
     params:

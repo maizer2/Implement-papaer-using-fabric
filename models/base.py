@@ -66,10 +66,6 @@ class Lit_base(pl.LightningModule):
         self.model.training_resume()
     
     def training_step(self, batch, batch_idx):
-        with torch.no_grad():
-            self.sampling(batch)
-            
-        exit()
         losses = self.model.get_loss(batch)
         
         self.logging_loss(losses, "train")
@@ -81,28 +77,20 @@ class Lit_base(pl.LightningModule):
         self.model.save_model()
         
     def validation_step(self, batch, batch_idx):
-        losses = self.model.get_loss(batch)
-        
-        self.logging_loss(losses, "val")
+        with torch.no_grad():
+            losses = self.model.get_loss(batch)
+            
+            self.logging_loss(losses, "val")
     
     def test_step(self, batch, batch_idx):
-        losses = self.model.get_loss(batch)
-        
-        self.logging_loss(losses, "test")
+        with torch.no_grad():
+            losses = self.model.get_loss(batch)
+            
+            self.logging_loss(losses, "test")
     
     def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> Any:
-        x0_hat = self.predict(batch)
+        self.model.predict(batch, self.num_sampling, self.logger.log_dir)
             
-    def predict(self, batch):
-        x0_hat = self.model.inference(batch, self.num_sampling)
-        
-        for idx, image in enumerate(x0_hat):
-            image = (image/ 2 + 0.5).clamp(0, 1)
-            image = ToPILImage()(image)
-            image.save(f"test_{idx}.png")
-        exit()
-        return x0_hat
-        
     def logging_loss(self, losses: Dict[str, int], prefix):
         for key in losses:
             self.log(f'{prefix}/{key}_loss', losses[key], prog_bar=True, sync_dist=True)

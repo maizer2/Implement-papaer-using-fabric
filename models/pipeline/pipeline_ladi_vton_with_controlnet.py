@@ -13,27 +13,36 @@
 # limitations under the License.
 
 import inspect
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union, Tuple
 
 import numpy as np
 import PIL.Image
 import torch
+import torch.nn as nn
+from torchvision import transforms
 from packaging import version
-from transformers import CLIPImageProcessor, CLIPTextModel, CLIPTokenizer, CLIPVisionModelWithProjection
+from transformers import CLIPImageProcessor, CLIPTextModel, CLIPTokenizer, CLIPVisionModelWithProjection, AutoProcessor
 
 from diffusers.configuration_utils import FrozenDict
 from diffusers.image_processor import PipelineImageInput, VaeImageProcessor
 from diffusers.loaders import FromSingleFileMixin, IPAdapterMixin, LoraLoaderMixin, TextualInversionLoaderMixin
 from diffusers.models import AsymmetricAutoencoderKL, AutoencoderKL, ImageProjection, UNet2DConditionModel
+from diffusers.models.controlnet import ControlNetModel
 from diffusers.models.attention_processor import FusedAttnProcessor2_0
 from diffusers.models.lora import adjust_lora_scale_text_encoder
 from diffusers.schedulers import KarrasDiffusionSchedulers
 from diffusers.utils import USE_PEFT_BACKEND, deprecate, logging, scale_lora_layers, unscale_lora_layers
-from diffusers.utils.torch_utils import randn_tensor
+from diffusers.utils.torch_utils import is_compiled_module, is_torch_version, randn_tensor
 from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 from diffusers.pipelines.stable_diffusion import StableDiffusionPipelineOutput
 from diffusers.pipelines.stable_diffusion.safety_checker import StableDiffusionSafetyChecker
+from diffusers.pipelines.controlnet.multicontrolnet import MultiControlNetModel
 
+from models.Diffusion.ladi_vton.utils.encode_text_word_embedding import encode_text_word_embedding
+from models.Diffusion.ladi_vton.models.ConvNet_TPS import ConvNet_TPS
+from models.Diffusion.ladi_vton.models.UNet import UNetVanilla
+from models.Diffusion.ladi_vton.models.emasc import EMASC
+from models.Diffusion.ladi_vton.models.inversion_adpater import InversionAdapter
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -219,7 +228,7 @@ def retrieve_timesteps(
     return timesteps, num_inference_steps
 
 
-class StableDiffusionInpaintPipeline(
+class LadiVtonWithControlnetPipeline(
     DiffusionPipeline, TextualInversionLoaderMixin, IPAdapterMixin, LoraLoaderMixin, FromSingleFileMixin
 ):
     r"""
@@ -263,14 +272,21 @@ class StableDiffusionInpaintPipeline(
     def __init__(
         self,
         vae: Union[AutoencoderKL, AsymmetricAutoencoderKL],
+        unet: UNet2DConditionModel,
+        controlnet: Union[ControlNetModel, List[ControlNetModel], Tuple[ControlNetModel], MultiControlNetModel],
         text_encoder: CLIPTextModel,
         tokenizer: CLIPTokenizer,
-        unet: UNet2DConditionModel,
         scheduler: KarrasDiffusionSchedulers,
-        safety_checker: StableDiffusionSafetyChecker,
-        feature_extractor: CLIPImageProcessor,
+        vision_encoder: CLIPVisionModelWithProjection = None,
+        processor: AutoProcessor = None,
+        tps: ConvNet_TPS = None,
+        refinement: UNetVanilla = None,
+        emasc: EMASC = None,
+        inversion_adapter: InversionAdapter = None,
+        safety_checker: StableDiffusionSafetyChecker = None,
+        feature_extractor: CLIPImageProcessor = None,
         image_encoder: CLIPVisionModelWithProjection = None,
-        requires_safety_checker: bool = True,
+        requires_safety_checker: bool = False,
     ):
         super().__init__()
 
@@ -338,9 +354,11 @@ class StableDiffusionInpaintPipeline(
             new_config = dict(unet.config)
             new_config["sample_size"] = 64
             unet._internal_dict = FrozenDict(new_config)
-
-        # Check shapes, assume num_channels_latents == 4, num_channels_mask == 1, num_channels_masked == 4
-        if unet.config.in_channels != 9:
+        
+        # This code has been modified.
+        # Check shapes, assume channels 
+        # latents == 4, mask == 1, masked == 4, cloth == 4, posemap == 18
+        if unet.config.in_channels != 31:
             logger.info(f"You have loaded a UNet with {unet.config.in_channels} input channels which.")
 
         self.register_modules(
@@ -348,6 +366,7 @@ class StableDiffusionInpaintPipeline(
             text_encoder=text_encoder,
             tokenizer=tokenizer,
             unet=unet,
+            controlnet=controlnet,
             scheduler=scheduler,
             safety_checker=safety_checker,
             feature_extractor=feature_extractor,
@@ -360,6 +379,14 @@ class StableDiffusionInpaintPipeline(
         )
         self.register_to_config(requires_safety_checker=requires_safety_checker)
 
+        self.vision_encoder = vision_encoder
+        self.processor = processor
+        
+        self.tps = tps
+        self.refinement = refinement
+        self.emasc = emasc
+        self.inversion_adapter = inversion_adapter
+        
     # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.StableDiffusionPipeline._encode_prompt
     def _encode_prompt(
         self,
@@ -575,6 +602,56 @@ class StableDiffusionInpaintPipeline(
 
         return prompt_embeds, negative_prompt_embeds
 
+    def get_text_encoder_input(self, caption, category):
+        if self.use_caption:
+            text = [cap for
+                    cap in caption]
+        else:
+            category_text = {
+                'dresses': 'a dress',
+                'upper_body': 'an upper body garment',
+                'lower_body': 'a lower body garment',
+            }
+            
+            # batch size lenght
+            text = [f'a photo of a model wearing {category_text[ctg]}' for
+                    ctg in category]
+        
+        return text
+    
+    def get_word_embedding(self, image, num_vstar):
+        # Get the visual features of the in-shop cloths
+        # (bsz, 3, 224, 224)
+        input_image = transforms.functional.resize((image + 1) / 2, (224, 224), antialias=True).clamp(0, 1)
+        # (bsz, 3, 224, 224)
+        processed_images = self.processor(images=input_image, return_tensors="pt", do_rescale=False)
+        # (bsz, 257, 1280)
+        clip_image_features = self.vision_encoder(processed_images.pixel_values.cuda()).last_hidden_state
+        # Compute the predicted PTEs
+        # (bsz, 16384)
+        word_embeddings = self.inversion_adapter(clip_image_features)
+        # (bsz, 16, 1024)
+        word_embeddings = word_embeddings.reshape((word_embeddings.shape[0], num_vstar, -1))
+        
+        return word_embeddings
+    
+    def get_tokenized_text(self, text):        
+        # Tokenize text ( bsz, 77 )
+        tokenized_text = self.tokenizer(text, max_length=self.tokenizer.model_max_length, padding="max_length",
+                                        truncation=True, return_tensors="pt").input_ids.cuda()
+        
+        return tokenized_text
+    
+    def get_encoder_hidden_states(self, image, text, num_vstar):
+        word_embeddings = self.get_word_embedding(image, num_vstar)
+        tokenized_text = self.get_tokenized_text(text)
+        
+        # Encode the text using the PTEs extracted from the in-shop cloths ( bsz, 77, 1024 )
+        encoder_hidden_states = encode_text_word_embedding(self.text_encoder, tokenized_text,
+                                                            word_embeddings, num_vstar).last_hidden_state
+            
+        return encoder_hidden_states
+     
     # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.StableDiffusionPipeline.encode_image
     def encode_image(self, image, device, num_images_per_prompt, output_hidden_states=None):
         dtype = next(self.image_encoder.parameters()).dtype
@@ -769,25 +846,39 @@ class StableDiffusionInpaintPipeline(
     def _encode_vae_image(self, image: torch.Tensor, generator: torch.Generator):
         if isinstance(generator, list):
             image_latents = [
-                retrieve_latents(self.vae.encode(image[i : i + 1]), generator=generator[i])
+                retrieve_latents(self.vae.encode(image[i : i + 1])[0], generator=generator[i])
                 for i in range(image.shape[0])
             ]
             image_latents = torch.cat(image_latents, dim=0)
         else:
-            image_latents = retrieve_latents(self.vae.encode(image), generator=generator)
+            image_latents = retrieve_latents(self.vae.encode(image)[0], generator=generator)
 
         image_latents = self.vae.config.scaling_factor * image_latents
 
         return image_latents
 
+    def mask_features(self, features: list, mask: torch.Tensor):
+        """
+        Mask features with the given mask.
+        """
+
+        for i, feature in enumerate(features):
+            # Resize the mask to the feature size.
+            mask = torch.nn.functional.interpolate(mask, size=feature.shape[-2:])
+
+            # Mask the feature.
+            features[i] = feature * (1 - mask)
+
+        return features
+    
     def prepare_mask_latents(
-        self, mask, masked_image, batch_size, height, width, dtype, device, generator, do_classifier_free_guidance
+        self, mask_image, masked_image, emasc_int_layers, batch_size, height, width, dtype, device, generator, do_classifier_free_guidance
     ):
         # resize the mask to latents shape as we concatenate the mask to the latents
         # we do that before converting to dtype to avoid breaking in case we're using cpu_offload
         # and half precision
         mask = torch.nn.functional.interpolate(
-            mask, size=(height // self.vae_scale_factor, width // self.vae_scale_factor)
+            mask_image, size=(height // self.vae_scale_factor, width // self.vae_scale_factor)
         )
         mask = mask.to(device=device, dtype=dtype)
 
@@ -823,8 +914,82 @@ class StableDiffusionInpaintPipeline(
 
         # aligning device to prevent device errors when concating it with the latent model input
         masked_image_latents = masked_image_latents.to(device=device, dtype=dtype)
-        return mask, masked_image_latents
+        
+        intermediate_features = self.vae.encode(masked_image)[1]
+        intermediate_features = [intermediate_features[i] for i in
+                                              emasc_int_layers]
+        intermediate_features = self.emasc(intermediate_features)
+        intermediate_features = self.mask_features(intermediate_features, mask_image)
+        
+        return mask, masked_image_latents, intermediate_features
 
+    def prepare_cloth_latents(
+        self, cloth_image, batch_size, height, width, dtype, device, generator, do_classifier_free_guidance
+    ):
+        # resize the cltoh to latents shape as we concatenate the cloth to the latents
+        # we do that before converting to dtype to avoid breaking in case we're using cpu_offload
+        # and half precision
+        cloth = torch.nn.functional.interpolate(
+            cloth_image, size=(height // self.vae_scale_factor, width // self.vae_scale_factor)
+        )
+        cloth = cloth.to(device=device, dtype=dtype)
+
+        cloth_image = cloth_image.to(device=device, dtype=dtype)
+
+        cloth_image_latents = self._encode_vae_image(cloth_image, generator=generator)
+
+        # duplicate mask and masked_image_latents for each generation per prompt, using mps friendly method
+        if cloth.shape[0] < batch_size:
+            if not batch_size % cloth.shape[0] == 0:
+                raise ValueError(
+                    "The passed mask and the required batch size don't match. Masks are supposed to be duplicated to"
+                    f" a total batch size of {batch_size}, but {cloth.shape[0]} masks were passed. Make sure the number"
+                    " of masks that you pass is divisible by the total requested batch size."
+                )
+            cloth = cloth.repeat(batch_size // cloth.shape[0], 1, 1, 1)
+        if cloth_image_latents.shape[0] < batch_size:
+            if not batch_size % cloth_image_latents.shape[0] == 0:
+                raise ValueError(
+                    "The passed images and the required batch size don't match. Images are supposed to be duplicated"
+                    f" to a total batch size of {batch_size}, but {cloth_image_latents.shape[0]} images were passed."
+                    " Make sure the number of images that you pass is divisible by the total requested batch size."
+                )
+            cloth_image_latents = cloth_image_latents.repeat(batch_size // cloth_image_latents.shape[0], 1, 1, 1)
+
+        cloth = torch.cat([cloth] * 2) if do_classifier_free_guidance else cloth
+        cloth_image_latents = (
+            torch.cat([cloth_image_latents] * 2) if do_classifier_free_guidance else cloth_image_latents
+        )
+
+        # aligning device to prevent device errors when concating it with the latent model input
+        cloth_image_latents = cloth_image_latents.to(device=device, dtype=dtype)
+        return cloth, cloth_image_latents
+
+    def prepare_posemap(
+        self, posemap_image, batch_size, height, width, dtype, device, do_classifier_free_guidance
+    ):
+        # resize the posemap to latents shape as we concatenate the posemap to the latents
+        # we do that before converting to dtype to avoid breaking in case we're using cpu_offload
+        # and half precision
+        posemap = torch.nn.functional.interpolate(
+            posemap_image, size=(height // self.vae_scale_factor, width // self.vae_scale_factor)
+        )
+        posemap = posemap.to(device=device, dtype=dtype)
+
+        # duplicate mask and masked_image_latents for each generation per prompt, using mps friendly method
+        if posemap.shape[0] < batch_size:
+            if not batch_size % posemap.shape[0] == 0:
+                raise ValueError(
+                    "The passed mask and the required batch size don't match. Masks are supposed to be duplicated to"
+                    f" a total batch size of {batch_size}, but {posemap.shape[0]} masks were passed. Make sure the number"
+                    " of masks that you pass is divisible by the total requested batch size."
+                )
+            posemap = posemap.repeat(batch_size // posemap.shape[0], 1, 1, 1)
+            
+        posemap = torch.cat([posemap] * 2) if do_classifier_free_guidance else posemap
+        
+        return posemap
+    
     # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_img2img.StableDiffusionImg2ImgPipeline.get_timesteps
     def get_timesteps(self, num_inference_steps, strength, device):
         # get the original timestep using init_timestep
@@ -953,6 +1118,36 @@ class StableDiffusionInpaintPipeline(
         assert emb.shape == (w.shape[0], embedding_dim)
         return emb
 
+    def warpping_cloth(self, cloth, im_mask, posemap, use_cloth_refinement):
+        # TPS parameters prediction
+        # For sake of performance, the TPS parameters are predicted on a low resolution image
+        low_cloth = transforms.functional.resize(cloth, (256, 192),
+                                                 transforms.InterpolationMode.BILINEAR,
+                                                 antialias=True)
+        low_im_mask = transforms.functional.resize(im_mask, (256, 192),
+                                                   transforms.InterpolationMode.BILINEAR,
+                                                   antialias=True)
+        low_posemap = transforms.functional.resize(posemap, (256, 192),
+                                                    transforms.InterpolationMode.BILINEAR,
+                                                    antialias=True)
+        agnostic = torch.cat([low_im_mask, low_posemap], 1)
+        low_grid, _, _, _, _, _, _, _ = self.tps(low_cloth, agnostic)
+
+        # We upsample the grid to the original image size and warp the cloth using the predicted TPS parameters
+        highres_grid = transforms.functional.resize(low_grid.permute(0, 3, 1, 2), size=(cloth.size(2), cloth.size(3)), 
+                               interpolation=transforms.InterpolationMode.BILINEAR, antialias=True).permute(0, 2, 3, 1)
+
+        warped_cloth = nn.functional.grid_sample(cloth, highres_grid, padding_mode='border', align_corners=True)
+        
+        if use_cloth_refinement:
+            # Refine the warped cloth using the refinement network
+            warped_cloth = torch.cat([im_mask, posemap, warped_cloth], 1)
+            warped_cloth = self.refinement(warped_cloth)
+            warped_cloth = warped_cloth.clamp(-1, 1)
+            warped_cloth = warped_cloth
+        
+        return warped_cloth
+    
     @property
     def guidance_scale(self):
         return self._guidance_scale
@@ -987,6 +1182,9 @@ class StableDiffusionInpaintPipeline(
         image: PipelineImageInput = None,
         mask_image: PipelineImageInput = None,
         masked_image_latents: torch.FloatTensor = None,
+        cloth_image: PipelineImageInput = None, # Added
+        warped_cloth_image: Union[PipelineImageInput, torch.FloatTensor] = None,
+        posemap_image: torch.FloatTensor = None, # Added
         height: Optional[int] = None,
         width: Optional[int] = None,
         padding_mask_crop: Optional[int] = None,
@@ -1008,6 +1206,13 @@ class StableDiffusionInpaintPipeline(
         clip_skip: int = None,
         callback_on_step_end: Optional[Callable[[int, int, Dict], None]] = None,
         callback_on_step_end_tensor_inputs: List[str] = ["latents"],
+        use_cloth_warpping: bool = True,
+        use_cloth_refinemnet: bool = False,
+        emasc_int_layers: list = [1, 2, 3, 4, 5],
+        num_vstar: int = 16,
+        controlnet_conditioning_scale: Union[float, List[float]] = 1.0,
+        control_guidance_start: Union[float, List[float]] = 0.0,
+        control_guidance_end: Union[float, List[float]] = 1.0,
         **kwargs,
     ):
         r"""
@@ -1153,6 +1358,19 @@ class StableDiffusionInpaintPipeline(
                 "Passing `callback_steps` as an input argument to `__call__` is deprecated, consider use `callback_on_step_end`",
             )
 
+        controlnet = self.controlnet._orig_mod if is_compiled_module(self.controlnet) else self.controlnet
+
+        # align format for control guidance
+        if not isinstance(control_guidance_start, list) and isinstance(control_guidance_end, list):
+            control_guidance_start = len(control_guidance_end) * [control_guidance_start]
+        elif not isinstance(control_guidance_end, list) and isinstance(control_guidance_start, list):
+            control_guidance_end = len(control_guidance_start) * [control_guidance_end]
+        elif not isinstance(control_guidance_start, list) and not isinstance(control_guidance_end, list):
+            mult = len(controlnet.nets) if isinstance(controlnet, MultiControlNetModel) else 1
+            control_guidance_start, control_guidance_end = (
+                mult * [control_guidance_start],
+                mult * [control_guidance_end],
+            )
         # 0. Default height and width to unet
         height = height or self.unet.config.sample_size * self.vae_scale_factor
         width = width or self.unet.config.sample_size * self.vae_scale_factor
@@ -1188,26 +1406,28 @@ class StableDiffusionInpaintPipeline(
 
         device = self._execution_device
 
+        if isinstance(controlnet, MultiControlNetModel) and isinstance(controlnet_conditioning_scale, float):
+            controlnet_conditioning_scale = [controlnet_conditioning_scale] * len(controlnet.nets)
+
+        global_pool_conditions = (
+            controlnet.config.global_pool_conditions
+            if isinstance(controlnet, ControlNetModel)
+            else controlnet.nets[0].config.global_pool_conditions
+        )
+        guess_mode = guess_mode or global_pool_conditions
+
         # 3. Encode input prompt
         text_encoder_lora_scale = (
             cross_attention_kwargs.get("scale", None) if cross_attention_kwargs is not None else None
         )
-        prompt_embeds, negative_prompt_embeds = self.encode_prompt(
-            prompt,
-            device,
-            num_images_per_prompt,
-            self.do_classifier_free_guidance,
-            negative_prompt,
-            prompt_embeds=prompt_embeds,
-            negative_prompt_embeds=negative_prompt_embeds,
-            lora_scale=text_encoder_lora_scale,
-            clip_skip=self.clip_skip,
-        )
+        
+        encoder_hidden_states = self.get_encoder_hidden_states(cloth_image, prompt, num_vstar)
+        
         # For classifier free guidance, we need to do two forward passes.
         # Here we concatenate the unconditional and text embeddings into a single batch
         # to avoid doing two forward passes
         if self.do_classifier_free_guidance:
-            prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds])
+            prompt_embeds = torch.cat([encoder_hidden_states] * 2)
 
         if ip_adapter_image is not None:
             output_hidden_state = False if isinstance(self.unet.encoder_hid_proj, ImageProjection) else True
@@ -1284,9 +1504,10 @@ class StableDiffusionInpaintPipeline(
         else:
             masked_image = masked_image_latents
 
-        mask, masked_image_latents = self.prepare_mask_latents(
+        mask, masked_image_latents, intermediate_features = self.prepare_mask_latents(
             mask_condition,
             masked_image,
+            emasc_int_layers,
             batch_size * num_images_per_prompt,
             height,
             width,
@@ -1295,13 +1516,50 @@ class StableDiffusionInpaintPipeline(
             generator,
             self.do_classifier_free_guidance,
         )
-
+        
+        ############### Added
+        if cloth_image is None:
+            warped_cloth_image = torch.randn([batch_size, 3, height, width], dtype=prompt_embeds.dtype, device=device)
+        else:
+            if use_cloth_warpping:
+                if warped_cloth_image is None:
+                    warped_cloth_image = self.warpping_cloth(cloth_image, masked_image, posemap_image, use_cloth_refinemnet)
+            else:
+                warped_cloth_image = cloth_image
+            
+        _, cloth_image_latents = self.prepare_cloth_latents(
+            warped_cloth_image,
+            batch_size * num_images_per_prompt,
+            height,
+            width,
+            prompt_embeds.dtype,
+            device,
+            generator,
+            self.do_classifier_free_guidance,
+        )
+        
+        posemap = self.prepare_posemap(
+            posemap_image,
+            batch_size * num_images_per_prompt,
+            height,
+            width,
+            prompt_embeds.dtype,
+            device,
+            self.do_classifier_free_guidance,
+        )
+        ###############
+        
         # 8. Check that sizes of mask, masked image and latents match
-        if num_channels_unet == 9:
+        if num_channels_unet == 31:
             # default case for runwayml/stable-diffusion-inpainting
             num_channels_mask = mask.shape[1]
             num_channels_masked_image = masked_image_latents.shape[1]
-            if num_channels_latents + num_channels_mask + num_channels_masked_image != self.unet.config.in_channels:
+            ############### Added
+            num_channels_cloth_image = cloth_image_latents.shape[1]
+            num_channels_posemap = posemap.shape[1]
+            ###############
+            if (num_channels_latents + num_channels_mask + num_channels_masked_image + 
+                num_channels_cloth_image + num_channels_posemap) != self.unet.config.in_channels:
                 raise ValueError(
                     f"Incorrect configuration settings! The config of `pipeline.unet`: {self.unet.config} expects"
                     f" {self.unet.config.in_channels} but received `num_channels_latents`: {num_channels_latents} +"
@@ -1342,8 +1600,9 @@ class StableDiffusionInpaintPipeline(
                 # concat latents, mask, masked_image_latents in the channel dimension
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
 
-                if num_channels_unet == 9:
-                    latent_model_input = torch.cat([latent_model_input, mask, masked_image_latents], dim=1)
+                if num_channels_unet == 31:
+                    latent_model_input = torch.cat([latent_model_input, mask, masked_image_latents,
+                                                    cloth_image_latents, posemap], dim=1)
 
                 # predict the noise residual
                 noise_pred = self.unet(
@@ -1386,7 +1645,7 @@ class StableDiffusionInpaintPipeline(
 
                     latents = callback_outputs.pop("latents", latents)
                     prompt_embeds = callback_outputs.pop("prompt_embeds", prompt_embeds)
-                    negative_prompt_embeds = callback_outputs.pop("negative_prompt_embeds", negative_prompt_embeds)
+                    # negative_prompt_embeds = callback_outputs.pop("negative_prompt_embeds", negative_prompt_embeds)
                     mask = callback_outputs.pop("mask", mask)
                     masked_image_latents = callback_outputs.pop("masked_image_latents", masked_image_latents)
 
@@ -1406,7 +1665,7 @@ class StableDiffusionInpaintPipeline(
                 mask_condition = mask_condition.to(device=device, dtype=masked_image_latents.dtype)
                 condition_kwargs = {"image": init_image_condition, "mask": mask_condition}
             image = self.vae.decode(
-                latents / self.vae.config.scaling_factor, return_dict=False, generator=generator, **condition_kwargs
+                latents / self.vae.config.scaling_factor, intermediate_features, return_dict=False, generator=generator, **condition_kwargs
             )[0]
             image, has_nsfw_concept = self.run_safety_checker(image, device, prompt_embeds.dtype)
         else:
@@ -1419,6 +1678,7 @@ class StableDiffusionInpaintPipeline(
             do_denormalize = [not has_nsfw for has_nsfw in has_nsfw_concept]
 
         image = self.image_processor.postprocess(image, output_type=output_type, do_denormalize=do_denormalize)
+        
 
         if padding_mask_crop is not None:
             image = [self.image_processor.apply_overlay(mask_image, original_image, i, crops_coords) for i in image]

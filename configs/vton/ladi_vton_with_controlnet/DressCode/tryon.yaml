@@ -5,7 +5,7 @@ model:
     sampling_step: 5
     num_sampling: 5
     model_config:
-      target: models.vton.custom_stable_diffusion_text_guided_inpainting_vton
+      target: models.vton.ladi_vton_with_controlnet
       params:
         optim_target: torch.optim.adamw.AdamW
         criterion_config:
@@ -17,11 +17,12 @@ model:
         use_cloth_warpping: True
         use_cloth_refinement: False
         use_img2img: False
-        model_path: checkpoints/vton/custom_stable_diffusion_text_guided_inpainting_vton/DressCode/unet.ckpt
+        conditioning_scale: 1.0
+        model_path: checkpoints/vton/ladi_vton_with_controlnet/DressCode/unet.ckpt
         train_resume: False
 
 logger:
-  logger_path: checkpoints/vton/custom_stable_diffusion_text_guided_inpainting_vton/DressCode/tryon
+  logger_path: checkpoints/vton/ladi_vton_with_controlnet/DressCode/tryon
     
 lightning:
   use_earlystop: False
@@ -37,6 +38,8 @@ lightning:
     max_epochs: 100000
     sync_batchnorm: True
     # devices: [0]
+  fit:
+    ckpt_path: 
 
 dataset:
   height: &height 512

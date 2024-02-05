@@ -37,6 +37,8 @@ lightning:
     max_epochs: 100000
     sync_batchnorm: True
     # devices: [0]
+  fit:
+    ckpt_path: 
 
 dataset:
   height: &height 512
