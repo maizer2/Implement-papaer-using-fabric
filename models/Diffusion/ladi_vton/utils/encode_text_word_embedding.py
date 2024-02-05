@@ -3,6 +3,15 @@ from transformers import CLIPTextModel
 from transformers.modeling_outputs import BaseModelOutputWithPooling
 
 
+def _build_causal_attention_mask(bsz, seq_len):
+    # lazily create causal attention mask, with full attention between the vision tokens
+    # pytorch uses additive attention mask; fill with -inf
+    mask = torch.empty(bsz, seq_len, seq_len)
+    mask.fill_(float("-inf"))
+    mask.triu_(1)  # zero out the lower diagonal
+    mask = mask.unsqueeze(1)  # expand mask
+    return mask
+
 def encode_text_word_embedding(text_encoder: CLIPTextModel, input_ids: torch.tensor, word_embeddings: torch.tensor,
                                num_vstar: int = 1) -> BaseModelOutputWithPooling:
     """
@@ -40,7 +49,7 @@ def encode_text_word_embedding(text_encoder: CLIPTextModel, input_ids: torch.ten
     bsz, seq_len = input_shape
     # CLIP's text model uses causal mask, prepare it here.
     # https://github.com/openai/CLIP/blob/cfcffb90e69f37bf2ff1e988237a0fbe41f33c04/clip/model.py#L324
-    causal_attention_mask = text_encoder.text_model._build_causal_attention_mask(bsz, seq_len, hidden_states.dtype).to(
+    causal_attention_mask = _build_causal_attention_mask(bsz, seq_len).to(
         hidden_states.device
     )
 

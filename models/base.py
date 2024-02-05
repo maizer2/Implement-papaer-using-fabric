@@ -66,6 +66,10 @@ class Lit_base(pl.LightningModule):
         self.model.training_resume()
     
     def training_step(self, batch, batch_idx):
+        with torch.no_grad():
+            self.sampling(batch)
+            
+        exit()
         losses = self.model.get_loss(batch)
         
         self.logging_loss(losses, "train")

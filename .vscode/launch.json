@@ -10,8 +10,8 @@
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
-            "justMyCode": false,
-            "args": ["--config", "configs/vton/stable_diffusion_text_guided_inpainting_vton/DressCode/tryon.yaml"]
+            // "justMyCode": false,
+            "args": ["--config", "configs/vton/ladi_vton/DressCode/tryon.yaml"]
         }
     ]
 }
