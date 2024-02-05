@@ -28,19 +28,12 @@ pip install -r requirements.txt
 
 ```
 
-usage: python3 run.py [--config] [--data_path] [--log_path]
-                      [--ckpt_path] [--num_workers] [--batch_size] 
-                      [--max_epochs]
+usage: python3 run.py [--inference] [--config]
 
 optional arguments:
 
   -h, --help            show this help message and exit.
+  --inference           When inferring the model.
   --config,             Path of model config file.
-  --data_path           Path of data.
-  --log_path            Path of lightning logs.
-  --ckpt_path           Path of ckpt.
-  --num_workera         Number of DataLoader workers.
-  --batch_size          Data batch size.
-  --max_epochs          Epoch lenghts.
 
 ```
