@@ -172,11 +172,11 @@ class cp_vton(Module_base):
         
         return optimizers, schedulers
 
-    def predict(self, batch, num_sampling, save_dir):
+    def predict(self, batch, save_dir):
         
         topil = transforms.ToPILImage()
         
-        outputs = self.inference(batch, num_sampling)
+        outputs = self.inference(batch)
         
         
         real = (outputs["real"] / 2 + 0.5).clamp(0, 1)
@@ -189,8 +189,8 @@ class cp_vton(Module_base):
             out_dir = os.path.join(save_dir, "inference", outputs["fake_id"][idx].split('.')[0])
             os.makedirs(out_dir, exist_ok=True)
             
-            real_pils[idx].save(os.path.join(out_dir, "fake.png"))
-            fake_pils[idx].save(os.path.join(out_dir, "real.png"))
+            real_pils[idx].save(os.path.join(out_dir, "real.png"))
+            fake_pils[idx].save(os.path.join(out_dir, "fake.png"))
      
 class stable_diffusion_text_guided_inpainting(Module_base):
     def __init__(self,
@@ -366,11 +366,11 @@ class stable_diffusion_text_guided_inpainting(Module_base):
         
         return optimizers, schedulers
     
-    def predict(self, batch, num_sampling, save_dir):
+    def predict(self, batch, save_dir):
         
         topil = transforms.ToPILImage()
         
-        outputs = self.inference(batch, num_sampling)
+        outputs = self.inference(batch)
         
         real = (outputs["real"] / 2 + 0.5).clamp(0, 1)
         fake = (outputs["fake"] / 2 + 0.5).clamp(0, 1)
@@ -388,8 +388,8 @@ class stable_diffusion_text_guided_inpainting(Module_base):
                 
             os.makedirs(out_dir, exist_ok=True)
             
-            real_pils[idx].save(os.path.join(out_dir, "fake.png"))
-            fake_pils[idx].save(os.path.join(out_dir, "real.png"))
+            real_pils[idx].save(os.path.join(out_dir, "real.png"))
+            fake_pils[idx].save(os.path.join(out_dir, "fake.png"))
             
 # ToDo
 class stable_diffusion_text_guided_inpainting_with_controlnet(Module_base):
@@ -639,11 +639,11 @@ class stable_diffusion_text_guided_inpainting_with_controlnet(Module_base):
         
         return optimizers, schedulers
  
-    def predict(self, batch, num_sampling, save_dir):
+    def predict(self, batch, save_dir):
         
         topil = transforms.ToPILImage()
         
-        outputs = self.inference(batch, num_sampling)
+        outputs = self.inference(batch)
         
         real = (outputs["real"] / 2 + 0.5).clamp(0, 1)
         fake = (outputs["fake"] / 2 + 0.5).clamp(0, 1)
@@ -665,8 +665,8 @@ class stable_diffusion_text_guided_inpainting_with_controlnet(Module_base):
                 
             os.makedirs(out_dir, exist_ok=True)
             
-            real_pils[idx].save(os.path.join(out_dir, "fake.png"))
-            fake_pils[idx].save(os.path.join(out_dir, "real.png"))
+            real_pils[idx].save(os.path.join(out_dir, "real.png"))
+            fake_pils[idx].save(os.path.join(out_dir, "fake.png"))
             cloth_pils[idx].save(os.path.join(out_dir, "cloth.png"))
             w_cloth_pils[idx].save(os.path.join(out_dir, "warped_cloth.png"))
      
@@ -805,7 +805,7 @@ class stable_diffusion_text_guided_inpainting_vton(Module_base):
         
         return rec_sample
     
-    def inference(self, batch, num_sampling):
+    def inference(self, batch, num_sampling=None):
         image, cloth, warped_cloth_image, masked_image, mask_image, posemap, prompt, im_name, c_name = self.get_input(batch, num_sampling)
         
         self.pipeline.to("cuda")
@@ -951,11 +951,11 @@ class stable_diffusion_text_guided_inpainting_vton(Module_base):
         
         return optimizers, schedulers
 
-    def predict(self, batch, num_sampling, save_dir):
+    def predict(self, batch, save_dir):
         
         topil = transforms.ToPILImage()
         
-        outputs = self.inference(batch, num_sampling)
+        outputs = self.inference(batch)
         
         real = (outputs["real"] / 2 + 0.5).clamp(0, 1)
         fake = (outputs["fake"] / 2 + 0.5).clamp(0, 1)
@@ -977,8 +977,8 @@ class stable_diffusion_text_guided_inpainting_vton(Module_base):
                 
             os.makedirs(out_dir, exist_ok=True)
             
-            real_pils[idx].save(os.path.join(out_dir, "fake.png"))
-            fake_pils[idx].save(os.path.join(out_dir, "real.png"))
+            real_pils[idx].save(os.path.join(out_dir, "real.png"))
+            fake_pils[idx].save(os.path.join(out_dir, "fake.png"))
             cloth_pils[idx].save(os.path.join(out_dir, "cloth.png"))
             w_cloth_pils[idx].save(os.path.join(out_dir, "warped_cloth.png"))
             
@@ -1283,11 +1283,11 @@ class stable_diffusion_text_guided_inpainting_vton_with_controlnet(Module_base):
         
         return optimizers, schedulers
 
-    def predict(self, batch, num_sampling, save_dir):
+    def predict(self, batch, save_dir):
         
         topil = transforms.ToPILImage()
         
-        outputs = self.inference(batch, num_sampling)
+        outputs = self.inference(batch)
         
         real = (outputs["real"] / 2 + 0.5).clamp(0, 1)
         fake = (outputs["fake"] / 2 + 0.5).clamp(0, 1)
@@ -1309,8 +1309,8 @@ class stable_diffusion_text_guided_inpainting_vton_with_controlnet(Module_base):
                 
             os.makedirs(out_dir, exist_ok=True)
             
-            real_pils[idx].save(os.path.join(out_dir, "fake.png"))
-            fake_pils[idx].save(os.path.join(out_dir, "real.png"))
+            real_pils[idx].save(os.path.join(out_dir, "real.png"))
+            fake_pils[idx].save(os.path.join(out_dir, "fake.png"))
             cloth_pils[idx].save(os.path.join(out_dir, "cloth.png"))
             w_cloth_pils[idx].save(os.path.join(out_dir, "warped_cloth.png"))
      
@@ -1639,11 +1639,11 @@ class ladi_vton(Module_base):
         
         return optimizers, schedulers
 
-    def predict(self, batch, num_sampling, save_dir):
+    def predict(self, batch, save_dir):
         
         topil = transforms.ToPILImage()
         
-        outputs = self.inference(batch, num_sampling)
+        outputs = self.inference(batch)
         
         real = (outputs["real"] / 2 + 0.5).clamp(0, 1)
         fake = (outputs["fake"] / 2 + 0.5).clamp(0, 1)
@@ -1665,8 +1665,8 @@ class ladi_vton(Module_base):
                 
             os.makedirs(out_dir, exist_ok=True)
             
-            real_pils[idx].save(os.path.join(out_dir, "fake.png"))
-            fake_pils[idx].save(os.path.join(out_dir, "real.png"))
+            real_pils[idx].save(os.path.join(out_dir, "real.png"))
+            fake_pils[idx].save(os.path.join(out_dir, "fake.png"))
             cloth_pils[idx].save(os.path.join(out_dir, "cloth.png"))
             w_cloth_pils[idx].save(os.path.join(out_dir, "warped_cloth.png"))
             
@@ -2015,11 +2015,11 @@ class ladi_vton_with_controlnet(Module_base):
         
         return optimizers, schedulers
 
-    def predict(self, batch, num_sampling, save_dir):
+    def predict(self, batch, save_dir):
         
         topil = transforms.ToPILImage()
         
-        outputs = self.inference(batch, num_sampling)
+        outputs = self.inference(batch)
         
         real = (outputs["real"] / 2 + 0.5).clamp(0, 1)
         fake = (outputs["fake"] / 2 + 0.5).clamp(0, 1)
@@ -2041,7 +2041,7 @@ class ladi_vton_with_controlnet(Module_base):
                 
             os.makedirs(out_dir, exist_ok=True)
             
-            real_pils[idx].save(os.path.join(out_dir, "fake.png"))
-            fake_pils[idx].save(os.path.join(out_dir, "real.png"))
+            real_pils[idx].save(os.path.join(out_dir, "real.png"))
+            fake_pils[idx].save(os.path.join(out_dir, "fake.png"))
             cloth_pils[idx].save(os.path.join(out_dir, "cloth.png"))
             w_cloth_pils[idx].save(os.path.join(out_dir, "warped_cloth.png"))

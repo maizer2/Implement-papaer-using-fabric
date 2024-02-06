@@ -93,7 +93,7 @@ class Lit_base(pl.LightningModule):
     def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> Any:
         save_dir = self.logger.log_dir if self.save_dir is None else self.save_dir
         os.makedirs(save_dir, exist_ok=True)
-        self.model.predict(batch, self.num_sampling, save_dir)
+        self.model.predict(batch, save_dir)
             
     def logging_loss(self, losses: Dict[str, int], prefix):
         for key in losses:

@@ -3,7 +3,7 @@ model:
   params:
     lr: 0.000001
     sampling_step: 5
-    num_sampling: 32
+    num_sampling: 20
     save_dir: outputs/stable_diffusion_text_guided_inpainting/DressCode
     model_config:
       target: models.vton.stable_diffusion_text_guided_inpainting
