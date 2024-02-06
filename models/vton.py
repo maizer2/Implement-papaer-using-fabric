@@ -288,9 +288,9 @@ class stable_diffusion_text_guided_inpainting(Module_base):
         x0_pred = 2.0 * x0_pred - 1.0
         
         return {"real": image, 
-                "real_id": im_name,
                 "fake": x0_pred,
-                "fake_id": [f"{im_name[idx].split('.')[0]}_{c_name[idx].split('.')[0]}.png" for idx in range(len(im_name))]}
+                "image_id": im_name,
+                "cloth_id": c_name}
     
     def get_input(self, batch, num_sampling = None):
         i = batch["image"]
@@ -372,7 +372,6 @@ class stable_diffusion_text_guided_inpainting(Module_base):
         
         outputs = self.inference(batch, num_sampling)
         
-        
         real = (outputs["real"] / 2 + 0.5).clamp(0, 1)
         fake = (outputs["fake"] / 2 + 0.5).clamp(0, 1)
         
@@ -380,7 +379,13 @@ class stable_diffusion_text_guided_inpainting(Module_base):
         fake_pils = [topil(fake_pt) for fake_pt in fake]
         
         for idx in range(len(real_pils)):
-            out_dir = os.path.join(save_dir, "inference", outputs["fake_id"][idx].split('.')[0])
+            fake_id = outputs['image_id'][idx].split('.')[0] + "_" + outputs['cloth_id'][idx].split('.')[0]
+            
+            if outputs['image_id'] == outputs['cloth_id']:
+                out_dir = os.path.join(save_dir, "inference", "paired", fake_id)
+            else:
+                out_dir = os.path.join(save_dir, "inference", "unpaired", fake_id)
+                
             os.makedirs(out_dir, exist_ok=True)
             
             real_pils[idx].save(os.path.join(out_dir, "fake.png"))
@@ -484,7 +489,7 @@ class stable_diffusion_text_guided_inpainting_with_controlnet(Module_base):
         return rec_sample
     
     def inference(self, batch, num_sampling):
-        image, _, mask_image, prompt, im_name, c_name = self.get_input(batch, num_sampling)
+        image, cloth, warped_cloth_image, masked_image, mask_image, prompt, im_name, c_name = self.get_input(batch, num_sampling)
         
         self.pipeline.to("cuda")
         x0_pred = self.pipeline(prompt=prompt,
@@ -500,9 +505,11 @@ class stable_diffusion_text_guided_inpainting_with_controlnet(Module_base):
         x0_pred = 2.0 * x0_pred - 1.0
         
         return {"real": image, 
-                "real_id": im_name,
                 "fake": x0_pred,
-                "fake_id": [f"{im_name[idx].split('.')[0]}_{c_name[idx].split('.')[0]}.png" for idx in range(len(im_name))]}
+                "cloth": cloth,
+                "warped_cloth": warped_cloth_image,
+                "image_id": im_name,
+                "cloth_id": c_name}
     
     def get_input(self, batch, num_sampling = None):
         i = batch["image"]
@@ -638,19 +645,30 @@ class stable_diffusion_text_guided_inpainting_with_controlnet(Module_base):
         
         outputs = self.inference(batch, num_sampling)
         
-        
         real = (outputs["real"] / 2 + 0.5).clamp(0, 1)
         fake = (outputs["fake"] / 2 + 0.5).clamp(0, 1)
+        cloth = (outputs["cloth"] / 2 + 0.5).clamp(0, 1)
+        w_cloth = (outputs["warped_cloth"] / 2 + 0.5).clamp(0, 1)
         
         real_pils = [topil(real_pt) for real_pt in real]
         fake_pils = [topil(fake_pt) for fake_pt in fake]
+        cloth_pils = [topil(cloth_pt) for cloth_pt in cloth]
+        w_cloth_pils = [topil(w_cloth_pt) for w_cloth_pt in w_cloth]
         
         for idx in range(len(real_pils)):
-            out_dir = os.path.join(save_dir, "inference", outputs["fake_id"][idx].split('.')[0])
+            fake_id = outputs['image_id'][idx].split('.')[0] + "_" + outputs['cloth_id'][idx].split('.')[0]
+            
+            if outputs['image_id'] == outputs['cloth_id']:
+                out_dir = os.path.join(save_dir, "inference", "paired", fake_id)
+            else:
+                out_dir = os.path.join(save_dir, "inference", "unpaired", fake_id)
+                
             os.makedirs(out_dir, exist_ok=True)
             
             real_pils[idx].save(os.path.join(out_dir, "fake.png"))
             fake_pils[idx].save(os.path.join(out_dir, "real.png"))
+            cloth_pils[idx].save(os.path.join(out_dir, "cloth.png"))
+            w_cloth_pils[idx].save(os.path.join(out_dir, "warped_cloth.png"))
      
 class stable_diffusion_text_guided_inpainting_vton(Module_base):
     def __init__(self,
@@ -809,9 +827,11 @@ class stable_diffusion_text_guided_inpainting_vton(Module_base):
         x0_pred = 2.0 * x0_pred - 1.0
             
         return {"real": image, 
-                "real_id": im_name,
                 "fake": x0_pred,
-                "fake_id": [f"{im_name[idx].split('.')[0]}_{c_name[idx].split('.')[0]}.png" for idx in range(len(im_name))]}
+                "cloth": cloth,
+                "warped_cloth": warped_cloth_image,
+                "image_id": im_name,
+                "cloth_id": c_name}
     
     def get_input(self, batch, num_sampling = None):
         i = batch["image"]
@@ -937,19 +957,30 @@ class stable_diffusion_text_guided_inpainting_vton(Module_base):
         
         outputs = self.inference(batch, num_sampling)
         
-        
         real = (outputs["real"] / 2 + 0.5).clamp(0, 1)
         fake = (outputs["fake"] / 2 + 0.5).clamp(0, 1)
+        cloth = (outputs["cloth"] / 2 + 0.5).clamp(0, 1)
+        w_cloth = (outputs["warped_cloth"] / 2 + 0.5).clamp(0, 1)
         
         real_pils = [topil(real_pt) for real_pt in real]
         fake_pils = [topil(fake_pt) for fake_pt in fake]
+        cloth_pils = [topil(cloth_pt) for cloth_pt in cloth]
+        w_cloth_pils = [topil(w_cloth_pt) for w_cloth_pt in w_cloth]
         
         for idx in range(len(real_pils)):
-            out_dir = os.path.join(save_dir, "inference", outputs["fake_id"][idx].split('.')[0])
+            fake_id = outputs['image_id'][idx].split('.')[0] + "_" + outputs['cloth_id'][idx].split('.')[0]
+            
+            if outputs['image_id'] == outputs['cloth_id']:
+                out_dir = os.path.join(save_dir, "inference", "paired", fake_id)
+            else:
+                out_dir = os.path.join(save_dir, "inference", "unpaired", fake_id)
+                
             os.makedirs(out_dir, exist_ok=True)
             
             real_pils[idx].save(os.path.join(out_dir, "fake.png"))
             fake_pils[idx].save(os.path.join(out_dir, "real.png"))
+            cloth_pils[idx].save(os.path.join(out_dir, "cloth.png"))
+            w_cloth_pils[idx].save(os.path.join(out_dir, "warped_cloth.png"))
             
 # ToDo
 class stable_diffusion_text_guided_inpainting_vton_with_controlnet(Module_base):
@@ -1118,9 +1149,11 @@ class stable_diffusion_text_guided_inpainting_vton_with_controlnet(Module_base):
         x0_pred = 2.0 * x0_pred - 1.0
             
         return {"real": image, 
-                "real_id": im_name,
                 "fake": x0_pred,
-                "fake_id": [f"{im_name[idx].split('.')[0]}_{c_name[idx].split('.')[0]}.png" for idx in range(len(im_name))]}
+                "cloth": cloth,
+                "warped_cloth": warped_cloth_image,
+                "image_id": im_name,
+                "cloth_id": c_name}
     
     def get_input(self, batch, num_sampling = None):
         i = batch["image"]
@@ -1256,19 +1289,30 @@ class stable_diffusion_text_guided_inpainting_vton_with_controlnet(Module_base):
         
         outputs = self.inference(batch, num_sampling)
         
-        
         real = (outputs["real"] / 2 + 0.5).clamp(0, 1)
         fake = (outputs["fake"] / 2 + 0.5).clamp(0, 1)
+        cloth = (outputs["cloth"] / 2 + 0.5).clamp(0, 1)
+        w_cloth = (outputs["warped_cloth"] / 2 + 0.5).clamp(0, 1)
         
         real_pils = [topil(real_pt) for real_pt in real]
         fake_pils = [topil(fake_pt) for fake_pt in fake]
+        cloth_pils = [topil(cloth_pt) for cloth_pt in cloth]
+        w_cloth_pils = [topil(w_cloth_pt) for w_cloth_pt in w_cloth]
         
         for idx in range(len(real_pils)):
-            out_dir = os.path.join(save_dir, "inference", outputs["fake_id"][idx].split('.')[0])
+            fake_id = outputs['image_id'][idx].split('.')[0] + "_" + outputs['cloth_id'][idx].split('.')[0]
+            
+            if outputs['image_id'] == outputs['cloth_id']:
+                out_dir = os.path.join(save_dir, "inference", "paired", fake_id)
+            else:
+                out_dir = os.path.join(save_dir, "inference", "unpaired", fake_id)
+                
             os.makedirs(out_dir, exist_ok=True)
             
             real_pils[idx].save(os.path.join(out_dir, "fake.png"))
             fake_pils[idx].save(os.path.join(out_dir, "real.png"))
+            cloth_pils[idx].save(os.path.join(out_dir, "cloth.png"))
+            w_cloth_pils[idx].save(os.path.join(out_dir, "warped_cloth.png"))
      
 class ladi_vton(Module_base):
     def __init__(self,
@@ -1446,9 +1490,11 @@ class ladi_vton(Module_base):
         x0_pred = 2.0 * x0_pred - 1.0
         
         return {"real": image, 
-                "real_id": im_name,
                 "fake": x0_pred,
-                "fake_id": [f"{im_name[idx].split('.')[0]}_{c_name[idx].split('.')[0]}.png" for idx in range(len(im_name))]}
+                "cloth": cloth,
+                "warped_cloth": warped_cloth_image,
+                "image_id": im_name,
+                "cloth_id": c_name}
     
     def get_input(self, batch, num_sampling = None):
         i = batch["image"]
@@ -1599,19 +1645,30 @@ class ladi_vton(Module_base):
         
         outputs = self.inference(batch, num_sampling)
         
-        
         real = (outputs["real"] / 2 + 0.5).clamp(0, 1)
         fake = (outputs["fake"] / 2 + 0.5).clamp(0, 1)
+        cloth = (outputs["cloth"] / 2 + 0.5).clamp(0, 1)
+        w_cloth = (outputs["warped_cloth"] / 2 + 0.5).clamp(0, 1)
         
         real_pils = [topil(real_pt) for real_pt in real]
         fake_pils = [topil(fake_pt) for fake_pt in fake]
+        cloth_pils = [topil(cloth_pt) for cloth_pt in cloth]
+        w_cloth_pils = [topil(w_cloth_pt) for w_cloth_pt in w_cloth]
         
         for idx in range(len(real_pils)):
-            out_dir = os.path.join(save_dir, "inference", outputs["fake_id"][idx].split('.')[0])
+            fake_id = outputs['image_id'][idx].split('.')[0] + "_" + outputs['cloth_id'][idx].split('.')[0]
+            
+            if outputs['image_id'] == outputs['cloth_id']:
+                out_dir = os.path.join(save_dir, "inference", "paired", fake_id)
+            else:
+                out_dir = os.path.join(save_dir, "inference", "unpaired", fake_id)
+                
             os.makedirs(out_dir, exist_ok=True)
             
             real_pils[idx].save(os.path.join(out_dir, "fake.png"))
             fake_pils[idx].save(os.path.join(out_dir, "real.png"))
+            cloth_pils[idx].save(os.path.join(out_dir, "cloth.png"))
+            w_cloth_pils[idx].save(os.path.join(out_dir, "warped_cloth.png"))
             
 # ToDo
 class ladi_vton_with_controlnet(Module_base):
@@ -1799,9 +1856,11 @@ class ladi_vton_with_controlnet(Module_base):
         x0_pred = 2.0 * x0_pred - 1.0
         
         return {"real": image, 
-                "real_id": im_name,
                 "fake": x0_pred,
-                "fake_id": [f"{im_name[idx].split('.')[0]}_{c_name[idx].split('.')[0]}.png" for idx in range(len(im_name))]}
+                "cloth": cloth,
+                "warped_cloth": warped_cloth_image,
+                "image_id": im_name,
+                "cloth_id": c_name}
     
     def get_input(self, batch, num_sampling = None):
         i = batch["image"]
@@ -1962,16 +2021,27 @@ class ladi_vton_with_controlnet(Module_base):
         
         outputs = self.inference(batch, num_sampling)
         
-        
         real = (outputs["real"] / 2 + 0.5).clamp(0, 1)
         fake = (outputs["fake"] / 2 + 0.5).clamp(0, 1)
+        cloth = (outputs["cloth"] / 2 + 0.5).clamp(0, 1)
+        w_cloth = (outputs["warped_cloth"] / 2 + 0.5).clamp(0, 1)
         
         real_pils = [topil(real_pt) for real_pt in real]
         fake_pils = [topil(fake_pt) for fake_pt in fake]
+        cloth_pils = [topil(cloth_pt) for cloth_pt in cloth]
+        w_cloth_pils = [topil(w_cloth_pt) for w_cloth_pt in w_cloth]
         
         for idx in range(len(real_pils)):
-            out_dir = os.path.join(save_dir, "inference", outputs["fake_id"][idx].split('.')[0])
+            fake_id = outputs['image_id'][idx].split('.')[0] + "_" + outputs['cloth_id'][idx].split('.')[0]
+            
+            if outputs['image_id'] == outputs['cloth_id']:
+                out_dir = os.path.join(save_dir, "inference", "paired", fake_id)
+            else:
+                out_dir = os.path.join(save_dir, "inference", "unpaired", fake_id)
+                
             os.makedirs(out_dir, exist_ok=True)
             
             real_pils[idx].save(os.path.join(out_dir, "fake.png"))
             fake_pils[idx].save(os.path.join(out_dir, "real.png"))
+            cloth_pils[idx].save(os.path.join(out_dir, "cloth.png"))
+            w_cloth_pils[idx].save(os.path.join(out_dir, "warped_cloth.png"))

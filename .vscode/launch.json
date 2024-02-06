@@ -11,7 +11,8 @@
             "program": "${file}",
             "console": "integratedTerminal",
             // "justMyCode": false,
-            "args": ["--config", "configs/vton/ladi_vton/DressCode/tryon.yaml"]
+            "args": ["--inference", 
+                     "--config", "configs/vton/stable_diffusion_text_guided_inpainting/DressCode/tryon.yaml"]
         }
     ]
 }

@@ -43,44 +43,64 @@ def transform_init(datasets, transform):
     for dataset in datasets:
         dataset.transform = transform
         
-def get_dataloader(data_config, transform=None, all=False):
-    train_dataset = instantiate_from_config(data_config.train)
-    val_dataset = instantiate_from_config(data_config.val)
-    test_dataset = instantiate_from_config(data_config.test)
+def get_dataloader(data_config, transform=None):
+    dataset_list = []
+    if "train" in data_config.get_loader:
+        train_dataset = instantiate_from_config(data_config.train)
+        dataset_list.append(train_dataset)
+    if "val" in data_config.get_loader:
+        val_dataset = instantiate_from_config(data_config.val)
+        dataset_list.append(val_dataset)
+    if "test" in data_config.get_loader:
+        test_dataset = instantiate_from_config(data_config.test)
+        dataset_list.append(test_dataset)
     
     if transform is None:
         transform = transforms.Compose([transforms.ToTensor(),
                                         transforms.Normalize((0.5, ), (0.5, )),
                                         transforms.Resize((data_config.height, data_config.width), antialias=True)])
         
+    transform_init(dataset_list, transform)
     
-    transform_init([train_dataset, val_dataset, test_dataset], transform)
-    
-    if all:
-        loader = data.DataLoader(train_dataset + val_dataset + test_dataset,
+    if data_config.all:
+        all_dataset = dataset_list[0]
+        for idx, dataset in enumerate(dataset_list):
+            if idx > 0:
+                all_dataset += dataset
+            
+        all_loader = data.DataLoader(all_dataset,
                                  batch_size=data_config.batch_size,
                                  num_workers=data_config.num_workers,
                                  drop_last=False)
-        return loader
+        
+        return all_loader
     
-    train_loader = data.DataLoader(train_dataset, 
-                                   batch_size=data_config.batch_size, 
-                                   num_workers=data_config.num_workers,
-                                   drop_last=True
-                                   )
-    
-    val_loader = data.DataLoader(val_dataset,
-                                 batch_size=data_config.batch_size,
-                                 num_workers=data_config.num_workers,
-                                 drop_last=True
-                                 )
-    
-    test_loader = data.DataLoader(test_dataset, 
-                                  batch_size=data_config.batch_size, 
-                                  num_workers=data_config.num_workers,
-                                  drop_last=True
-                                  )
-                            
+    if "train" in data_config.get_loader:
+        train_loader = data.DataLoader(train_dataset, 
+                                       batch_size=data_config.batch_size, 
+                                       num_workers=data_config.num_workers,
+                                       drop_last=True
+                                       )
+    else:
+        train_loader = None
+        
+    if "val" in data_config.get_loader:
+        val_loader = data.DataLoader(val_dataset,
+                                     batch_size=data_config.batch_size,
+                                     num_workers=data_config.num_workers,
+                                     drop_last=True
+                                     )
+    else:
+        val_loader = None
+        
+    if "test" in data_config.get_loader:
+        test_loader = data.DataLoader(test_dataset, 
+                                      batch_size=data_config.batch_size, 
+                                      num_workers=data_config.num_workers,
+                                      drop_last=True
+                                      )
+    else:
+        test_loader = None           
     
     return train_loader, val_loader, test_loader
 
@@ -110,11 +130,15 @@ if __name__ == "__main__":
                     val_dataloaders=val_loader,
                     ckpt_path=lightning_config.fit.ckpt_path)
         
-        # trainer.test(model=model,
-        #              dataloaders=test_loader)
+        if test_loader is not None:
+            trainer.test(model=model,
+                        dataloaders=test_loader)
         
     else:
-        data_loaders = get_dataloader(data_config, all=True)
+        if data_config.all:
+            data_loaders = get_dataloader(data_config)
+        else:
+            _, _, data_loaders = get_dataloader(data_config) # test_loader
         
         trainer.predict(model=model, 
                         dataloaders=data_loaders,

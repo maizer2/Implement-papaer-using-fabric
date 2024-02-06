@@ -4,6 +4,7 @@ model:
     lr: 0.000001
     sampling_step: 5
     num_sampling: 32
+    save_dir: outputs/stable_diffusion_text_guided_inpainting/DressCode
     model_config:
       target: models.vton.stable_diffusion_text_guided_inpainting
       params:
@@ -36,6 +37,8 @@ lightning:
     ckpt_path: 
 
 dataset:
+  all: False
+  get_loader: [train, val, test]
   height: &height 512
   width: &width 384
   num_workers: 6
@@ -46,7 +49,6 @@ dataset:
       size: [*height, *width]
       dataroot_path: &dataroot_path data/DressCode
       phase: train
-      order: &order unpaired
       category: &data_category
       - upper_body
       - lower_body
@@ -65,7 +67,6 @@ dataset:
       size: [*height, *width]
       dataroot_path: *dataroot_path
       phase: val
-      order: *order
       category: *data_category
       outputlist: *data_outputlist
   test:
@@ -73,7 +74,7 @@ dataset:
     params:
       size: [*height, *width]
       phase: test
-      order: *order
+      order: unpaired
       dataroot_path: *dataroot_path
       category: *data_category
       outputlist: *data_outputlist

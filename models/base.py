@@ -49,11 +49,13 @@ class Lit_base(pl.LightningModule):
                  lr: float,
                  model_config,
                  sampling_step: int = 5,
-                 num_sampling: int = 20) -> None:
+                 num_sampling: int = 20,
+                 save_dir: os.path = None) -> None:
         super().__init__()
         self.lr = lr
         self.sampling_step = sampling_step
         self.num_sampling = num_sampling
+        self.save_dir = save_dir
         
         self.model = instantiate_from_config(model_config)
         
@@ -89,7 +91,9 @@ class Lit_base(pl.LightningModule):
             self.logging_loss(losses, "test")
     
     def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> Any:
-        self.model.predict(batch, self.num_sampling, self.logger.log_dir)
+        save_dir = self.logger.log_dir if self.save_dir is None else self.save_dir
+        os.makedirs(save_dir, exist_ok=True)
+        self.model.predict(batch, self.num_sampling, save_dir)
             
     def logging_loss(self, losses: Dict[str, int], prefix):
         for key in losses:
