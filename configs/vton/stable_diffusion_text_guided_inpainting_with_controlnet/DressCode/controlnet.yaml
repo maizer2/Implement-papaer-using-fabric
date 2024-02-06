@@ -11,16 +11,17 @@ model:
         optim_target: torch.optim.adamw.AdamW
         criterion_config:
           target: torch.nn.MSELoss
+        dataset_name: dresscode
         num_inference_steps: 50
         use_caption: Ture
         use_cloth_warpping: True
         use_cloth_refinement: False
         conditioning_scale: 1.0
-        model_path: checkpoints/vton/stable_diffusion_text_guided_inpainting_with_controlnet/DressCode/unet.ckpt
+        model_path: checkpoints/vton/stable_diffusion_text_guided_inpainting_with_controlnet/DressCode/controlnet.ckpt
         train_resume: False
 
 logger:
-  logger_path: checkpoints/vton/stable_diffusion_text_guided_inpainting_with_controlnet/DressCode/tryon
+  logger_path: checkpoints/vton/stable_diffusion_text_guided_inpainting_with_controlnet/DressCode/controlnet
     
 lightning:
   use_earlystop: False
@@ -60,8 +61,10 @@ dataset:
       - c_name
       - im_name
       - image
+      - cloth
       - inpaint_mask
       - im_mask
+      - pose_map
       - category
       - captions
   val:

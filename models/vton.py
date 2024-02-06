@@ -396,6 +396,7 @@ class stable_diffusion_text_guided_inpainting_with_controlnet(Module_base):
     def __init__(self,
                  optim_target: tuple,
                  criterion_config: tuple,
+                 dataset_name: str = "vitonhd", # dresscode
                  num_inference_steps: int = 50,
                  use_caption: bool = False,
                  use_cloth_warpping: bool = True,
@@ -412,6 +413,12 @@ class stable_diffusion_text_guided_inpainting_with_controlnet(Module_base):
         self.use_cloth_refinement = use_cloth_refinement
         self.conditioning_scale = conditioning_scale
                 
+        # refinemnet network casuses the garment pattern to disappear.
+        # I recommend not using refinemnet network.
+        # If you want to use refinement network, please specify option "use_cloth_refinemnet" in the yaml file.
+        self.tps, self.refinement = torch.hub.load(repo_or_dir='miccunifi/ladi-vton', source='github', model='warping_module',
+                                                   dataset=dataset_name)
+        
         self.text_encoder = CLIPTextModel.from_pretrained("stabilityai/stable-diffusion-2-inpainting", subfolder="text_encoder")
         self.tokenizer = CLIPTokenizer.from_pretrained("stabilityai/stable-diffusion-2-inpainting", subfolder="tokenizer")
         self.scheduler = DDIMScheduler.from_pretrained("stabilityai/stable-diffusion-2-inpainting", subfolder="scheduler")
@@ -430,7 +437,9 @@ class stable_diffusion_text_guided_inpainting_with_controlnet(Module_base):
                                  tokenizer=self.tokenizer,
                                  unet=self.unet,
                                  scheduler=self.scheduler,
-                                 controlnet=self.controlnet)
+                                 controlnet=self.controlnet,
+                                 safety_checker=None,
+                                 feature_extractor=None)
         
     def training_resume(self):
         # This method is executed by the pl.LightningModule.
@@ -489,7 +498,7 @@ class stable_diffusion_text_guided_inpainting_with_controlnet(Module_base):
         return rec_sample
     
     def inference(self, batch, num_sampling=None):
-        image, cloth, warped_cloth_image, masked_image, mask_image, prompt, im_name, c_name = self.get_input(batch, num_sampling)
+        image, cloth, warped_cloth_image, _, mask_image, _, prompt, im_name, c_name = self.get_input(batch, num_sampling)
         
         self.pipeline.to("cuda")
         x0_pred = self.pipeline(prompt=prompt,

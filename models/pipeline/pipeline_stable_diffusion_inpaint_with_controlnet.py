@@ -1012,6 +1012,7 @@ class StableDiffusionInpaintWithControlnetPipeline(
         clip_skip: int = None,
         callback_on_step_end: Optional[Callable[[int, int, Dict], None]] = None,
         callback_on_step_end_tensor_inputs: List[str] = ["latents"],
+        guess_mode: bool = False,
         controlnet_conditioning_scale: Union[float, List[float]] = 1.0,
         control_guidance_start: Union[float, List[float]] = 0.0,
         control_guidance_end: Union[float, List[float]] = 1.0,
