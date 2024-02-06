@@ -271,7 +271,7 @@ class stable_diffusion_text_guided_inpainting(Module_base):
         
         return rec_sample
     
-    def inference(self, batch, num_sampling):
+    def inference(self, batch, num_sampling=None):
         image, _, mask_image, prompt, im_name, c_name = self.get_input(batch, num_sampling)
         
         self.pipeline.to("cuda")
@@ -488,7 +488,7 @@ class stable_diffusion_text_guided_inpainting_with_controlnet(Module_base):
         
         return rec_sample
     
-    def inference(self, batch, num_sampling):
+    def inference(self, batch, num_sampling=None):
         image, cloth, warped_cloth_image, masked_image, mask_image, prompt, im_name, c_name = self.get_input(batch, num_sampling)
         
         self.pipeline.to("cuda")
@@ -1127,7 +1127,7 @@ class stable_diffusion_text_guided_inpainting_vton_with_controlnet(Module_base):
         
         return rec_sample
     
-    def inference(self, batch, num_sampling):
+    def inference(self, batch, num_sampling=None):
         image, cloth, warped_cloth_image, masked_image, mask_image, posemap, prompt, im_name, c_name = self.get_input(batch, num_sampling)
         
         self.pipeline.to("cuda")
@@ -1466,7 +1466,7 @@ class ladi_vton(Module_base):
         
         return rec_sample
     
-    def inference(self, batch, num_sampling):
+    def inference(self, batch, num_sampling=None):
         image, cloth, warped_cloth_image, _, mask_image, posemap, prompt, im_name, c_name = self.get_input(batch, num_sampling)
         
         self.pipeline.to("cuda")
@@ -1832,7 +1832,7 @@ class ladi_vton_with_controlnet(Module_base):
         
         return rec_sample
     
-    def inference(self, batch, num_sampling):
+    def inference(self, batch, num_sampling=None):
         image, cloth, warped_cloth_image, _, mask_image, posemap, prompt, im_name, c_name = self.get_input(batch, num_sampling)
         
         self.pipeline.to("cuda")

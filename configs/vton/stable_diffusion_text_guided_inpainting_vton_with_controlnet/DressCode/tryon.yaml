@@ -42,6 +42,8 @@ lightning:
     ckpt_path: 
 
 dataset:
+  all: False
+  get_loader: [train, val, test]
   height: &height 512
   width: &width 384
   num_workers: 6
@@ -61,7 +63,7 @@ dataset:
       - im_name
       - image
       - cloth
-      - warped_cloth
+      # - warped_cloth
       - pose_map
       - inpaint_mask
       - im_mask

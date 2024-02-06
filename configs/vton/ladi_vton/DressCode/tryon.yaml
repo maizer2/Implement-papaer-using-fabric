@@ -3,7 +3,8 @@ model:
   params:
     lr: 0.000001
     sampling_step: 5
-    num_sampling: 5
+    num_sampling: 20
+    save_dir: outputs/ladi_vton/DressCode
     model_config:
       target: models.vton.ladi_vton
       params:
@@ -41,10 +42,12 @@ lightning:
     ckpt_path: 
 
 dataset:
+  all: False
+  get_loader: [train, val, test]
   height: &height 512
   width: &width 384
   num_workers: 6
-  batch_size: 8
+  batch_size: 32
   train:
     target: &data_target dataloader.dresscode.DressCodeDataset
     params:
@@ -60,7 +63,7 @@ dataset:
       - im_name
       - image
       - cloth
-      - warped_cloth
+      # - warped_cloth
       - pose_map
       - inpaint_mask
       - im_mask
@@ -79,7 +82,7 @@ dataset:
     params:
       size: [*height, *width]
       phase: test
-      order: paired
+      order: unpaired
       dataroot_path: *dataroot_path
       category: *data_category
       outputlist: *data_outputlist

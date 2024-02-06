@@ -39,6 +39,8 @@ lightning:
     ckpt_path: 
 
 dataset:
+  all: False
+  get_loader: [train, val, test]
   height: &height 512
   width: &width 384
   num_workers: 6
