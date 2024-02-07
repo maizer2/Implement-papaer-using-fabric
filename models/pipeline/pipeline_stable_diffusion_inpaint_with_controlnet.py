@@ -18,6 +18,9 @@ from typing import Any, Callable, Dict, List, Optional, Union, Tuple
 import numpy as np
 import PIL.Image
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torchvision import transforms
 from packaging import version
 from transformers import CLIPImageProcessor, CLIPTextModel, CLIPTokenizer, CLIPVisionModelWithProjection
 
@@ -362,6 +365,9 @@ class StableDiffusionInpaintWithControlnetPipeline(
         self.mask_processor = VaeImageProcessor(
             vae_scale_factor=self.vae_scale_factor, do_normalize=False, do_binarize=True, do_convert_grayscale=True
         )
+        self.control_image_processor = VaeImageProcessor(
+            vae_scale_factor=self.vae_scale_factor, do_convert_rgb=True, do_normalize=False
+        )
         self.register_to_config(requires_safety_checker=requires_safety_checker)
 
     # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.StableDiffusionPipeline._encode_prompt
@@ -651,6 +657,9 @@ class StableDiffusionInpaintWithControlnetPipeline(
         negative_prompt_embeds=None,
         callback_on_step_end_tensor_inputs=None,
         padding_mask_crop=None,
+        controlnet_conditioning_scale=1.0,
+        control_guidance_start=0.0,
+        control_guidance_end=1.0,
     ):
         if strength < 0 or strength > 1:
             raise ValueError(f"The value of strength should in [0.0, 1.0] but is {strength}")
@@ -711,6 +720,97 @@ class StableDiffusionInpaintWithControlnetPipeline(
                     f"The mask image should be a PIL image when inpainting mask crop, but is of type"
                     f" {type(mask_image)}."
                 )
+
+        # Check `image`
+        is_compiled = hasattr(F, "scaled_dot_product_attention") and isinstance(
+            self.controlnet, torch._dynamo.eval_frame.OptimizedModule
+        )
+        
+        # Check `controlnet_conditioning_scale`
+        if (
+            isinstance(self.controlnet, ControlNetModel)
+            or is_compiled
+            and isinstance(self.controlnet._orig_mod, ControlNetModel)
+        ):
+            if not isinstance(controlnet_conditioning_scale, float):
+                raise TypeError("For single controlnet: `controlnet_conditioning_scale` must be type `float`.")
+        elif (
+            isinstance(self.controlnet, MultiControlNetModel)
+            or is_compiled
+            and isinstance(self.controlnet._orig_mod, MultiControlNetModel)
+        ):
+            if isinstance(controlnet_conditioning_scale, list):
+                if any(isinstance(i, list) for i in controlnet_conditioning_scale):
+                    raise ValueError(
+                        "A single batch of varying conditioning scale settings (e.g. [[1.0, 0.5], [0.2, 0.8]]) is not supported at the moment. "
+                        "The conditioning scale must be fixed across the batch."
+                    )
+            elif isinstance(controlnet_conditioning_scale, list) and len(controlnet_conditioning_scale) != len(
+                self.controlnet.nets
+            ):
+                raise ValueError(
+                    "For multiple controlnets: When `controlnet_conditioning_scale` is specified as `list`, it must have"
+                    " the same length as the number of controlnets"
+                )
+        else:
+            assert False
+
+        if not isinstance(control_guidance_start, (tuple, list)):
+            control_guidance_start = [control_guidance_start]
+
+        if not isinstance(control_guidance_end, (tuple, list)):
+            control_guidance_end = [control_guidance_end]
+
+        if len(control_guidance_start) != len(control_guidance_end):
+            raise ValueError(
+                f"`control_guidance_start` has {len(control_guidance_start)} elements, but `control_guidance_end` has {len(control_guidance_end)} elements. Make sure to provide the same number of elements to each list."
+            )
+
+        if isinstance(self.controlnet, MultiControlNetModel):
+            if len(control_guidance_start) != len(self.controlnet.nets):
+                raise ValueError(
+                    f"`control_guidance_start`: {control_guidance_start} has {len(control_guidance_start)} elements but there are {len(self.controlnet.nets)} controlnets available. Make sure to provide {len(self.controlnet.nets)}."
+                )
+
+        for start, end in zip(control_guidance_start, control_guidance_end):
+            if start >= end:
+                raise ValueError(
+                    f"control guidance start: {start} cannot be larger or equal to control guidance end: {end}."
+                )
+            if start < 0.0:
+                raise ValueError(f"control guidance start: {start} can't be smaller than 0.")
+            if end > 1.0:
+                raise ValueError(f"control guidance end: {end} can't be larger than 1.0.")
+            
+    def prepare_controlnet_condition_image(
+        self,
+        image,
+        width,
+        height,
+        batch_size,
+        num_images_per_prompt,
+        device,
+        dtype,
+        do_classifier_free_guidance=False,
+        guess_mode=False,
+    ):
+        image = self.control_image_processor.preprocess(image, height=height, width=width).to(dtype=torch.float32)
+        image_batch_size = image.shape[0]
+
+        if image_batch_size == 1:
+            repeat_by = batch_size
+        else:
+            # image batch size is the same as prompt batch size
+            repeat_by = num_images_per_prompt
+
+        image = image.repeat_interleave(repeat_by, dim=0)
+
+        image = image.to(device=device, dtype=dtype)
+
+        if do_classifier_free_guidance and not guess_mode:
+            image = torch.cat([image] * 2)
+
+        return image
 
     def prepare_latents(
         self,
@@ -957,6 +1057,36 @@ class StableDiffusionInpaintWithControlnetPipeline(
         assert emb.shape == (w.shape[0], embedding_dim)
         return emb
 
+    def warpping_cloth(self, cloth, im_mask, posemap, use_cloth_refinement):
+        # TPS parameters prediction
+        # For sake of performance, the TPS parameters are predicted on a low resolution image
+        low_cloth = transforms.functional.resize(cloth, (256, 192),
+                                                 transforms.InterpolationMode.BILINEAR,
+                                                 antialias=True)
+        low_im_mask = transforms.functional.resize(im_mask, (256, 192),
+                                                   transforms.InterpolationMode.BILINEAR,
+                                                   antialias=True)
+        low_posemap = transforms.functional.resize(posemap, (256, 192),
+                                                    transforms.InterpolationMode.BILINEAR,
+                                                    antialias=True)
+        agnostic = torch.cat([low_im_mask, low_posemap], 1)
+        low_grid, _, _, _, _, _, _, _ = self.tps(low_cloth, agnostic)
+
+        # We upsample the grid to the original image size and warp the cloth using the predicted TPS parameters
+        highres_grid = transforms.functional.resize(low_grid.permute(0, 3, 1, 2), size=(cloth.size(2), cloth.size(3)), 
+                               interpolation=transforms.InterpolationMode.BILINEAR, antialias=True).permute(0, 2, 3, 1)
+
+        warped_cloth = nn.functional.grid_sample(cloth, highres_grid, padding_mode='border', align_corners=True)
+        
+        if use_cloth_refinement:
+            # Refine the warped cloth using the refinement network
+            warped_cloth = torch.cat([im_mask, posemap, warped_cloth], 1)
+            warped_cloth = self.refinement(warped_cloth)
+            warped_cloth = warped_cloth.clamp(-1, 1)
+            warped_cloth = warped_cloth
+        
+        return warped_cloth
+    
     @property
     def guidance_scale(self):
         return self._guidance_scale
@@ -991,6 +1121,9 @@ class StableDiffusionInpaintWithControlnetPipeline(
         image: PipelineImageInput = None,
         mask_image: PipelineImageInput = None,
         masked_image_latents: torch.FloatTensor = None,
+        cloth_image: PipelineImageInput = None, # Added
+        warped_cloth_image: Union[PipelineImageInput, torch.FloatTensor] = None,
+        posemap_image: torch.FloatTensor = None, # Added
         height: Optional[int] = None,
         width: Optional[int] = None,
         padding_mask_crop: Optional[int] = None,
@@ -1016,6 +1149,8 @@ class StableDiffusionInpaintWithControlnetPipeline(
         controlnet_conditioning_scale: Union[float, List[float]] = 1.0,
         control_guidance_start: Union[float, List[float]] = 0.0,
         control_guidance_end: Union[float, List[float]] = 1.0,
+        use_cloth_warpping: bool = True,
+        use_cloth_refinement: bool = False,
         **kwargs,
     ):
         r"""
@@ -1193,6 +1328,10 @@ class StableDiffusionInpaintWithControlnetPipeline(
             negative_prompt_embeds,
             callback_on_step_end_tensor_inputs,
             padding_mask_crop,
+            controlnet_conditioning_scale,
+            control_guidance_start,
+            control_guidance_end,
+            callback_on_step_end_tensor_inputs,
         )
 
         self._guidance_scale = guidance_scale
@@ -1274,12 +1413,65 @@ class StableDiffusionInpaintWithControlnetPipeline(
             crops_coords = None
             resize_mode = "default"
 
+        ############### Added
+        if cloth_image is None:
+            warped_cloth_image = torch.randn([batch_size, 3, height, width], dtype=prompt_embeds.dtype, device=device)
+        else:
+            if use_cloth_warpping:
+                if warped_cloth_image is None:
+                    warped_cloth_image = self.warpping_cloth(cloth_image, masked_image, posemap_image, use_cloth_refinement)
+            else:
+                warped_cloth_image = cloth_image
+                    
         original_image = image
         init_image = self.image_processor.preprocess(
             image, height=height, width=width, crops_coords=crops_coords, resize_mode=resize_mode
         )
         init_image = init_image.to(dtype=torch.float32)
 
+        # Prepare Controlnet Condition Image
+        if isinstance(controlnet, ControlNetModel):
+            controlnet_cond_image = self.prepare_controlnet_condition_image(
+                image=warped_cloth_image,
+                width=width,
+                height=height,
+                batch_size=batch_size * num_images_per_prompt,
+                num_images_per_prompt=num_images_per_prompt,
+                device=device,
+                dtype=controlnet.dtype,
+                do_classifier_free_guidance=self.do_classifier_free_guidance,
+                guess_mode=guess_mode,
+            )
+            height, width = controlnet_cond_image.shape[-2:]
+        elif isinstance(controlnet, MultiControlNetModel):
+            controlnet_cond_image = None
+            controlnet_cond_images = []
+
+            # Nested lists as ControlNet condition
+            if isinstance(warped_cloth_image[0], list):
+                # Transpose the nested image list
+                warped_cloth_image = [list(t) for t in zip(*warped_cloth_image)]
+
+            for warped_cloth_image_ in warped_cloth_image:
+                controlnet_cond_image_ = self.prepare_controlnet_condition_image(
+                    image=warped_cloth_image_,
+                    width=width,
+                    height=height,
+                    batch_size=batch_size * num_images_per_prompt,
+                    num_images_per_prompt=num_images_per_prompt,
+                    device=device,
+                    dtype=controlnet.dtype,
+                    do_classifier_free_guidance=self.do_classifier_free_guidance,
+                    guess_mode=guess_mode,
+                )
+
+                controlnet_cond_images.append(warped_cloth_image_)
+
+            controlnet_cond_image = controlnet_cond_images
+            height, width = controlnet_cond_image[0].shape[-2:]
+        else:
+            assert False
+             
         # 6. Prepare latent variables
         num_channels_latents = self.vae.config.latent_channels
         num_channels_unet = self.unet.config.in_channels
@@ -1360,13 +1552,29 @@ class StableDiffusionInpaintWithControlnetPipeline(
                 guidance_scale_tensor, embedding_dim=self.unet.config.time_cond_proj_dim
             ).to(device=device, dtype=latents.dtype)
 
+        # 7.2 Create tensor stating which controlnets to keep
+        controlnet_keep = []
+        for i in range(len(timesteps)):
+            keeps = [
+                1.0 - float(i / len(timesteps) < s or (i + 1) / len(timesteps) > e)
+                for s, e in zip(control_guidance_start, control_guidance_end)
+            ]
+            controlnet_keep.append(keeps[0] if isinstance(controlnet, ControlNetModel) else keeps)
+
         # 10. Denoising loop
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
+        is_unet_compiled = is_compiled_module(self.unet)
+        is_controlnet_compiled = is_compiled_module(self.controlnet)
         self._num_timesteps = len(timesteps)
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 if self.interrupt:
                     continue
+                
+                # Relevant thread:
+                # https://dev-discuss.pytorch.org/t/cudagraphs-in-pytorch-2-0/1428
+                if (is_unet_compiled and is_controlnet_compiled) and is_torch_higher_equal_2_1:
+                    torch._inductor.cudagraph_mark_step_begin()
 
                 # expand the latents if we are doing classifier free guidance
                 latent_model_input = torch.cat([latents] * 2) if self.do_classifier_free_guidance else latents

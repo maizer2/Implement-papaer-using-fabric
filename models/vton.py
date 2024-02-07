@@ -413,9 +413,9 @@ class stable_diffusion_text_guided_inpainting_with_controlnet(Module_base):
         self.use_cloth_refinement = use_cloth_refinement
         self.conditioning_scale = conditioning_scale
                 
-        # refinemnet network casuses the garment pattern to disappear.
-        # I recommend not using refinemnet network.
-        # If you want to use refinement network, please specify option "use_cloth_refinemnet" in the yaml file.
+        # refinement network casuses the garment pattern to disappear.
+        # I recommend not using refinement network.
+        # If you want to use refinement network, please specify option "use_cloth_refinement" in the yaml file.
         self.tps, self.refinement = torch.hub.load(repo_or_dir='miccunifi/ladi-vton', source='github', model='warping_module',
                                                    dataset=dataset_name)
         
@@ -504,10 +504,13 @@ class stable_diffusion_text_guided_inpainting_with_controlnet(Module_base):
         x0_pred = self.pipeline(prompt=prompt,
                                 image=image,
                                 mask_image=mask_image,
+                                cloth_image=cloth,
                                 height = 512,
                                 width = 384,
                                 num_inference_steps=self.num_inference_steps,
-                                output_type="pt"
+                                output_type="pt",
+                                use_cloth_warpping=self.use_cloth_warpping,
+                                use_cloth_refinement=self.use_cloth_refinement,
                                 ).images
         # re normalize
         ## because pipeline has denormalize
@@ -703,9 +706,9 @@ class stable_diffusion_text_guided_inpainting_vton(Module_base):
         self.use_cloth_refinement = use_cloth_refinement
         self.use_img2img = use_img2img
         
-        # refinemnet network casuses the garment pattern to disappear.
-        # I recommend not using refinemnet network.
-        # If you want to use refinement network, please specify option "use_cloth_refinemnet" in the yaml file.
+        # refinement network casuses the garment pattern to disappear.
+        # I recommend not using refinement network.
+        # If you want to use refinement network, please specify option "use_cloth_refinement" in the yaml file.
         self.tps, self.refinement = torch.hub.load(repo_or_dir='miccunifi/ladi-vton', source='github', model='warping_module',
                                                    dataset=dataset_name)
         
@@ -829,7 +832,7 @@ class stable_diffusion_text_guided_inpainting_vton(Module_base):
                                 num_inference_steps=self.num_inference_steps,
                                 output_type="pt",
                                 use_cloth_warpping=self.use_cloth_warpping,
-                                use_cloth_refinemnet=self.use_cloth_refinement
+                                use_cloth_refinement=self.use_cloth_refinement
                                 ).images
         # re normalize
         ## because pipeline has denormalize
@@ -1018,9 +1021,9 @@ class stable_diffusion_text_guided_inpainting_vton_with_controlnet(Module_base):
         self.use_img2img = use_img2img
         self.conditioning_scale = conditioning_scale
         
-        # refinemnet network casuses the garment pattern to disappear.
-        # I recommend not using refinemnet network.
-        # If you want to use refinement network, please specify option "use_cloth_refinemnet" in the yaml file.
+        # refinement network casuses the garment pattern to disappear.
+        # I recommend not using refinement network.
+        # If you want to use refinement network, please specify option "use_cloth_refinement" in the yaml file.
         self.tps, self.refinement = torch.hub.load(repo_or_dir='miccunifi/ladi-vton', source='github', model='warping_module',
                                                    dataset=dataset_name)
         
@@ -1151,7 +1154,7 @@ class stable_diffusion_text_guided_inpainting_vton_with_controlnet(Module_base):
                                 num_inference_steps=self.num_inference_steps,
                                 output_type="pt",
                                 use_cloth_warpping=self.use_cloth_warpping,
-                                use_cloth_refinemnet=self.use_cloth_refinement
+                                use_cloth_refinement=self.use_cloth_refinement
                                 ).images
         # re normalize
         ## because pipeline has denormalize
@@ -1351,9 +1354,9 @@ class ladi_vton(Module_base):
         self.emasc_int_layers = [1, 2, 3, 4, 5]
         self.num_vstar = 16
         
-        # refinemnet network casuses the garment pattern to disappear.
-        # I recommend not using refinemnet network.
-        # If you want to use refinement network, please specify option "use_cloth_refinemnet" in the yaml file.
+        # refinement network casuses the garment pattern to disappear.
+        # I recommend not using refinement network.
+        # If you want to use refinement network, please specify option "use_cloth_refinement" in the yaml file.
         self.tps, self.refinement = torch.hub.load(repo_or_dir='miccunifi/ladi-vton', source='github', model='warping_module',
                                                    dataset=dataset_name)
         
@@ -1490,7 +1493,7 @@ class ladi_vton(Module_base):
                                 num_inference_steps=self.num_inference_steps,
                                 output_type="pt",
                                 use_cloth_warpping=self.use_cloth_warpping,
-                                use_cloth_refinemnet=self.use_cloth_refinement,
+                                use_cloth_refinement=self.use_cloth_refinement,
                                 emasc_int_layers=self.emasc_int_layers,
                                 num_vstar=self.num_vstar
                                 ).images
@@ -1710,9 +1713,9 @@ class ladi_vton_with_controlnet(Module_base):
         self.emasc_int_layers = [1, 2, 3, 4, 5]
         self.num_vstar = 16
         
-        # refinemnet network casuses the garment pattern to disappear.
-        # I recommend not using refinemnet network.
-        # If you want to use refinement network, please specify option "use_cloth_refinemnet" in the yaml file.
+        # refinement network casuses the garment pattern to disappear.
+        # I recommend not using refinement network.
+        # If you want to use refinement network, please specify option "use_cloth_refinement" in the yaml file.
         self.tps, self.refinement = torch.hub.load(repo_or_dir='miccunifi/ladi-vton', source='github', model='warping_module',
                                                    dataset=dataset_name)
         
@@ -1856,7 +1859,7 @@ class ladi_vton_with_controlnet(Module_base):
                                 num_inference_steps=self.num_inference_steps,
                                 output_type="pt",
                                 use_cloth_warpping=self.use_cloth_warpping,
-                                use_cloth_refinemnet=self.use_cloth_refinement,
+                                use_cloth_refinement=self.use_cloth_refinement,
                                 emasc_int_layers=self.emasc_int_layers,
                                 num_vstar=self.num_vstar
                                 ).images

@@ -1207,7 +1207,7 @@ class LadiVtonWithControlnetPipeline(
         callback_on_step_end: Optional[Callable[[int, int, Dict], None]] = None,
         callback_on_step_end_tensor_inputs: List[str] = ["latents"],
         use_cloth_warpping: bool = True,
-        use_cloth_refinemnet: bool = False,
+        use_cloth_refinement: bool = False,
         emasc_int_layers: list = [1, 2, 3, 4, 5],
         num_vstar: int = 16,
         controlnet_conditioning_scale: Union[float, List[float]] = 1.0,
@@ -1523,7 +1523,7 @@ class LadiVtonWithControlnetPipeline(
         else:
             if use_cloth_warpping:
                 if warped_cloth_image is None:
-                    warped_cloth_image = self.warpping_cloth(cloth_image, masked_image, posemap_image, use_cloth_refinemnet)
+                    warped_cloth_image = self.warpping_cloth(cloth_image, masked_image, posemap_image, use_cloth_refinement)
             else:
                 warped_cloth_image = cloth_image
             
