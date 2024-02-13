@@ -24,6 +24,253 @@ def model_eval(models: list):
         model.requires_grad_(False)
         model.eval()
         
+class VTON_base(Module_base):
+    def __init__(self, 
+                 optim_target: tuple,
+                 criterion_config: tuple,
+                 model_path: str = None,
+                 train_resume: bool = False,
+                 
+                 use_cloth_warpping: bool = True,
+                 use_cloth_refinement: bool = False,
+                 ):
+        super().__init__(optim_target, criterion_config, model_path, train_resume)
+        
+        self.use_cloth_warpping = use_cloth_warpping
+        self.use_cloth_refinement = use_cloth_refinement
+        
+        self.model = None
+        
+    def training_resume(self):
+        # This method is executed by the pl.LightningModule.
+        if self.train_resume and os.path.exists(self.model_path) and os.path.isfile(self.model_path):
+            print("Unet loaded")
+            self.model.load_state_dict(torch.load(self.model_path))
+        
+    def forward_diffusion_process(self, z0, noise = None, t = None):
+        if noise is None:
+            noise = torch.randn(z0.shape, dtype=z0.dtype, device=z0.device)
+        
+        if t is None:
+            t = torch.full((z0.size(0), ), self.scheduler.timesteps[0], dtype=torch.long, device=z0.device)
+            
+        zT = self.scheduler.add_noise(z0, noise, t)
+    
+        return zT
+    
+    def reverse_diffusion_process(self):
+        # Not using
+        pass
+    
+    def warpping_cloth(self, cloth, im_mask, pose_map):
+        # TPS parameters prediction
+        # For sake of performance, the TPS parameters are predicted on a low resolution image
+        low_cloth = transforms.functional.resize(cloth, (256, 192),
+                                                 transforms.InterpolationMode.BILINEAR,
+                                                 antialias=True)
+        low_im_mask = transforms.functional.resize(im_mask, (256, 192),
+                                                   transforms.InterpolationMode.BILINEAR,
+                                                   antialias=True)
+        low_pose_map = transforms.functional.resize(pose_map, (256, 192),
+                                                    transforms.InterpolationMode.BILINEAR,
+                                                    antialias=True)
+        agnostic = torch.cat([low_im_mask, low_pose_map], 1)
+        low_grid, _, _, _, _, _, _, _ = self.tps(low_cloth, agnostic)
+
+        # We upsample the grid to the original image size and warp the cloth using the predicted TPS parameters
+        highres_grid = transforms.functional.resize(low_grid.permute(0, 3, 1, 2), size=(cloth.size(2), cloth.size(3)), 
+                               interpolation=transforms.InterpolationMode.BILINEAR, antialias=True).permute(0, 2, 3, 1)
+
+        warped_cloth = nn.functional.grid_sample(cloth, highres_grid, padding_mode='border', align_corners=True)
+        
+        if self.use_cloth_refinement:
+            # Refine the warped cloth using the refinement network
+            warped_cloth = torch.cat([im_mask, pose_map, warped_cloth], 1)
+            warped_cloth = self.refinement(warped_cloth)
+            warped_cloth = warped_cloth.clamp(-1, 1)
+            warped_cloth = warped_cloth
+        
+        return warped_cloth
+    
+    def get_warped_cloth(self, cloth, im_mask, pose_map):
+        if self.use_cloth_warpping:
+            warped_cloth = self.warpping_cloth(cloth, im_mask, pose_map)
+        else:
+            warped_cloth = cloth
+        
+        return warped_cloth
+    
+    def get_image_log(self, batch, num_sampling):
+        outputs = self.inference(batch, num_sampling)
+
+        return {"real": outputs["real"],
+                "fake": outputs["fake"]}
+        
+    def configure_optimizers(self, lr):
+        optim = self.optimizer(self.model.parameters(), lr)
+        
+        lambda2 = lambda epoch: 0.95 ** epoch
+        
+        scheduler = LambdaLR(optim, lambda2)
+        
+        optimizers = [optim]
+        schedulers = [scheduler]
+        
+        return optimizers, schedulers
+    
+    def save_model(self):
+        pass
+    
+class Diffusion_VTON_base(VTON_base):
+    def __init__(self, 
+                 optim_target: tuple,
+                 criterion_config: tuple,
+                 model_path: str = None,
+                 train_resume: bool = False,
+                 
+                 dataset_name: str = "vitonhd", # ["vitonhd", "dresscode"]
+                 in_channels: int = 31,
+                 num_inference_steps: int = 50,
+                 use_caption: bool = False,
+                 use_cloth_warpping: bool = True,
+                 use_cloth_refinement: bool = False,
+                 use_img2img: bool = True,
+                 ):
+        super().__init__(optim_target, criterion_config, model_path, train_resume)
+        
+        self.dataset_name = dataset_name
+        self.in_channels = in_channels
+        self.num_inference_steps = num_inference_steps
+        self.use_caption = use_caption
+        self.use_cloth_warpping = use_cloth_warpping
+        self.use_cloth_refinement = use_cloth_refinement
+        self.use_img2img = use_img2img
+        
+    def unet_new_in_channels(self):
+        if self.train_resume:
+            if self.unet.config.in_channels != self.unet.conv_in.in_channels:
+                raise ValueError(f"unet conv_in channels[{self.unet.conv_in.in_channels}] and unet config in_channels[{self.unet.config.in_channels}] is different.")
+        else:
+            # 9channels -> 31channels
+            # the posemap has 18 channels, the (encoded) cloth has 4 channels, the standard SD inpaining has 9 channels
+            with torch.no_grad():
+                # Replace the first conv layer of the unet with a new one with the correct number of input channels
+                conv_new = torch.nn.Conv2d(
+                    in_channels=self.in_channels,
+                    out_channels=self.unet.conv_in.out_channels,
+                    kernel_size=3,
+                    padding=1,
+                )
+
+            torch.nn.init.kaiming_normal_(conv_new.weight)  # Initialize new conv layer
+            conv_new.weight.data = conv_new.weight.data * 0.  # Zero-initialize new conv layer
+
+            conv_new.weight.data[:, :9] = self.unet.conv_in.weight.data  # Copy weights from old conv layer
+            conv_new.bias.data = self.unet.conv_in.bias.data  # Copy bias from old conv layer
+            
+            # replace conv layer in unet
+            self.unet.conv_in = conv_new  
+             # update config
+            self.unet.config.in_channels = self.in_channels 
+            self.unet.config["in_channels"] = self.in_channels
+    
+    def training_resume(self):
+        # This method is executed by the pl.LightningModule.
+        if self.train_resume and os.path.exists(self.model_path) and os.path.isfile(self.model_path):
+            print("Unet loaded")
+            self.unet.load_state_dict(torch.load(self.model_path))
+        
+    def forward_diffusion_process(self, z0, noise = None, t = None):
+        if noise is None:
+            noise = torch.randn(z0.shape, dtype=z0.dtype, device=z0.device)
+        
+        if t is None:
+            t = torch.full((z0.size(0), ), self.scheduler.timesteps[0], dtype=torch.long, device=z0.device)
+            
+        zT = self.scheduler.add_noise(z0, noise, t)
+    
+        return zT
+    
+    def reverse_diffusion_process(self):
+        # Not using
+        pass
+    
+    def warpping_cloth(self, cloth, im_mask, pose_map):
+        # TPS parameters prediction
+        # For sake of performance, the TPS parameters are predicted on a low resolution image
+        low_cloth = transforms.functional.resize(cloth, (256, 192),
+                                                 transforms.InterpolationMode.BILINEAR,
+                                                 antialias=True)
+        low_im_mask = transforms.functional.resize(im_mask, (256, 192),
+                                                   transforms.InterpolationMode.BILINEAR,
+                                                   antialias=True)
+        low_pose_map = transforms.functional.resize(pose_map, (256, 192),
+                                                    transforms.InterpolationMode.BILINEAR,
+                                                    antialias=True)
+        agnostic = torch.cat([low_im_mask, low_pose_map], 1)
+        low_grid, _, _, _, _, _, _, _ = self.tps(low_cloth, agnostic)
+
+        # We upsample the grid to the original image size and warp the cloth using the predicted TPS parameters
+        highres_grid = transforms.functional.resize(low_grid.permute(0, 3, 1, 2), size=(cloth.size(2), cloth.size(3)), 
+                               interpolation=transforms.InterpolationMode.BILINEAR, antialias=True).permute(0, 2, 3, 1)
+
+        warped_cloth = nn.functional.grid_sample(cloth, highres_grid, padding_mode='border', align_corners=True)
+        
+        if self.use_cloth_refinement:
+            # Refine the warped cloth using the refinement network
+            warped_cloth = torch.cat([im_mask, pose_map, warped_cloth], 1)
+            warped_cloth = self.refinement(warped_cloth)
+            warped_cloth = warped_cloth.clamp(-1, 1)
+            warped_cloth = warped_cloth
+        
+        return warped_cloth
+    
+    def get_warped_cloth(self, cloth, im_mask, pose_map):
+        if self.use_cloth_warpping:
+            warped_cloth = self.warpping_cloth(cloth, im_mask, pose_map)
+        else:
+            warped_cloth = cloth
+        
+        return warped_cloth
+    
+    def get_text_encoder_input(self, caption, category):
+        if self.use_caption:
+            text = [cap for
+                    cap in caption]
+        else:
+            category_text = {
+                'dresses': 'a dress',
+                'upper_body': 'an upper body garment',
+                'lower_body': 'a lower body garment',
+            }
+            
+            # batch size lenght
+            text = [f'a photo of a model wearing {category_text[ctg]}' for
+                    ctg in category]
+        
+        return text
+    
+    def get_image_log(self, batch, num_sampling):
+        outputs = self.inference(batch, num_sampling)
+
+        return {"real": outputs["real"],
+                "fake": outputs["fake"]}
+        
+    def configure_optimizers(self, lr):
+        optim = self.optimizer(self.unet.parameters(), lr)
+        
+        lambda2 = lambda epoch: 0.95 ** epoch
+        
+        scheduler = LambdaLR(optim, lambda2)
+        
+        optimizers = [optim]
+        schedulers = [scheduler]
+        
+        return optimizers, schedulers
+    
+    def save_model(self):
+        torch.save(self.unet.state_dict(), self.model_path)
+        
 class cp_vton(Module_base):
     '''
     ECCV 2018
@@ -192,20 +439,23 @@ class cp_vton(Module_base):
             real_pils[idx].save(os.path.join(out_dir, "real.png"))
             fake_pils[idx].save(os.path.join(out_dir, "fake.png"))
      
-class stable_diffusion_text_guided_inpainting(Module_base):
+class stable_diffusion_text_guided_inpainting(Diffusion_VTON_base):
     def __init__(self,
                  optim_target: tuple,
                  criterion_config: tuple,
+                 dataset_name: str = "vitonhd", # ["vitonhd", "dresscode"]
+                 in_channels: int = 9,
                  num_inference_steps: int = 50,
                  use_caption: bool = False,
+                 use_cloth_warpping: bool = True,
+                 use_cloth_refinement: bool = False,
+                 use_img2img: bool = True,
                  model_path = None, # .../unet.ckpt
                  train_resume: bool = False
-                 ):        
-        super().__init__(optim_target, criterion_config, model_path, train_resume)
-
-        self.num_inference_steps = num_inference_steps
-        self.use_caption = use_caption
-                
+                 ):
+        super().__init__(optim_target, criterion_config, model_path, train_resume,
+                         dataset_name, in_channels, num_inference_steps, use_caption, use_cloth_warpping, use_cloth_refinement, use_img2img)
+        
         self.text_encoder = CLIPTextModel.from_pretrained("stabilityai/stable-diffusion-2-inpainting", subfolder="text_encoder")
         self.tokenizer = CLIPTokenizer.from_pretrained("stabilityai/stable-diffusion-2-inpainting", subfolder="tokenizer")
         self.scheduler = DDIMScheduler.from_pretrained("stabilityai/stable-diffusion-2-inpainting", subfolder="scheduler")
@@ -218,28 +468,7 @@ class stable_diffusion_text_guided_inpainting(Module_base):
 
         from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_inpaint import StableDiffusionInpaintPipeline as pipeline
         self.pipeline = pipeline.from_pretrained("stabilityai/stable-diffusion-2-inpainting")
-        
-    def training_resume(self):
-        # This method is executed by the pl.LightningModule.
-        if self.train_resume and os.path.exists(self.model_path) and os.path.isfile(self.model_path):
-            print("Unet loaded")
-            self.unet.load_state_dict(torch.load(self.model_path))
-         
-    def forward_diffusion_process(self, z0, noise = None, t = None) -> torch.from_numpy:
-        if noise is None:
-            noise = torch.randn(z0.shape, dtype=z0.dtype, device=z0.device)
-        
-        if t is None:
-            t = torch.full((z0.size(0), ), self.scheduler.timesteps[0], dtype=torch.long, device=z0.device)
-            
-        zT = self.scheduler.add_noise(z0, noise, t)
-    
-        return zT
-    
-    def reverse_diffusion_process(self):
-        # Not using
-        pass
-    
+                     
     def get_loss(self, batch):
         z0, unet_input, noise, encoder_hidden_states = self.pre_process(batch)
         unet_output = self(z0, unet_input, noise, encoder_hidden_states)
@@ -312,23 +541,6 @@ class stable_diffusion_text_guided_inpainting(Module_base):
             
         return i, i_m, m, text, im_name, c_name
         
-    def get_text_encoder_input(self, caption, category):
-        if self.use_caption:
-            text = [cap for
-                    cap in caption]
-        else:
-            category_text = {
-                'dresses': 'a dress',
-                'upper_body': 'an upper body garment',
-                'lower_body': 'a lower body garment',
-            }
-            
-            # batch size lenght
-            text = [f'a photo of a model wearing {category_text[ctg]}' for
-                    ctg in category]
-        
-        return text
-    
     def get_tokenized_text(self, text):        
         # Tokenize text ( bsz, 77 )
         tokenized_text = self.tokenizer(text, max_length=self.tokenizer.model_max_length, padding="max_length",
@@ -345,27 +557,6 @@ class stable_diffusion_text_guided_inpainting(Module_base):
             
         return encoder_hidden_states
      
-    def get_image_log(self, batch, num_sampling):
-        outputs = self.inference(batch, num_sampling)
-
-        return {"real": outputs["real"],
-                "fake": outputs["fake"]}
-        
-    def save_model(self):
-        torch.save(self.unet.state_dict(), self.model_path)
-        
-    def configure_optimizers(self, lr):
-        optim = self.optimizer(self.unet.parameters(), lr)
-        
-        lambda2 = lambda epoch: 0.95 ** epoch
-        
-        scheduler = LambdaLR(optim, lambda2)
-        
-        optimizers = [optim]
-        schedulers = [scheduler]
-        
-        return optimizers, schedulers
-    
     def predict(self, batch, save_dir):
         
         topil = transforms.ToPILImage()
@@ -390,7 +581,7 @@ class stable_diffusion_text_guided_inpainting(Module_base):
             
             real_pils[idx].save(os.path.join(out_dir, "real.png"))
             fake_pils[idx].save(os.path.join(out_dir, "fake.png"))
-            
+      
 # ToDo
 class stable_diffusion_text_guided_inpainting_with_controlnet(Module_base):
     def __init__(self,
@@ -682,7 +873,7 @@ class stable_diffusion_text_guided_inpainting_with_controlnet(Module_base):
             cloth_pils[idx].save(os.path.join(out_dir, "cloth.png"))
             w_cloth_pils[idx].save(os.path.join(out_dir, "warped_cloth.png"))
      
-class stable_diffusion_text_guided_inpainting_vton(Module_base):
+class stable_diffusion_text_guided_inpainting_vton(Diffusion_VTON_base):
     def __init__(self,
                  optim_target: tuple,
                  criterion_config: tuple,
@@ -695,16 +886,10 @@ class stable_diffusion_text_guided_inpainting_vton(Module_base):
                  use_img2img: bool = True,
                  model_path = None, # .../unet.ckpt
                  train_resume: bool = False
-                 ):        
-        super().__init__(optim_target, criterion_config, model_path, train_resume)
-
-        self.dataset_name = dataset_name
-        self.in_channels = in_channels
-        self.num_inference_steps = num_inference_steps
-        self.use_caption = use_caption
-        self.use_cloth_warpping = use_cloth_warpping
-        self.use_cloth_refinement = use_cloth_refinement
-        self.use_img2img = use_img2img
+                 ):
+        super().__init__(optim_target, criterion_config, model_path, train_resume,
+                         dataset_name, in_channels, num_inference_steps, use_caption, use_cloth_warpping, use_cloth_refinement, use_img2img)
+        
         
         # refinement network casuses the garment pattern to disappear.
         # I recommend not using refinement network.
@@ -732,55 +917,6 @@ class stable_diffusion_text_guided_inpainting_vton(Module_base):
                                  tps=self.tps,
                                  refinement=self.refinement)
         
-    def unet_new_in_channels(self):
-        if self.train_resume:
-            if self.unet.config.in_channels != self.unet.conv_in.in_channels:
-                raise ValueError(f"unet conv_in channels[{self.unet.conv_in.in_channels}] and unet config in_channels[{self.unet.config.in_channels}] is different.")
-        else:
-            # 9channels -> 31channels
-            # the posemap has 18 channels, the (encoded) cloth has 4 channels, the standard SD inpaining has 9 channels
-            with torch.no_grad():
-                # Replace the first conv layer of the unet with a new one with the correct number of input channels
-                conv_new = torch.nn.Conv2d(
-                    in_channels=self.in_channels,
-                    out_channels=self.unet.conv_in.out_channels,
-                    kernel_size=3,
-                    padding=1,
-                )
-
-            torch.nn.init.kaiming_normal_(conv_new.weight)  # Initialize new conv layer
-            conv_new.weight.data = conv_new.weight.data * 0.  # Zero-initialize new conv layer
-
-            conv_new.weight.data[:, :9] = self.unet.conv_in.weight.data  # Copy weights from old conv layer
-            conv_new.bias.data = self.unet.conv_in.bias.data  # Copy bias from old conv layer
-            
-            # replace conv layer in unet
-            self.unet.conv_in = conv_new  
-             # update config
-            self.unet.config.in_channels = self.in_channels 
-            self.unet.config["in_channels"] = self.in_channels
-    
-    def training_resume(self):
-        # This method is executed by the pl.LightningModule.
-        if self.train_resume and os.path.exists(self.model_path) and os.path.isfile(self.model_path):
-            print("Unet loaded")
-            self.unet.load_state_dict(torch.load(self.model_path))
-         
-    def forward_diffusion_process(self, z0, noise = None, t = None) -> torch.from_numpy:
-        if noise is None:
-            noise = torch.randn(z0.shape, dtype=z0.dtype, device=z0.device)
-        
-        if t is None:
-            t = torch.full((z0.size(0), ), self.scheduler.timesteps[0], dtype=torch.long, device=z0.device)
-            
-        zT = self.scheduler.add_noise(z0, noise, t)
-    
-        return zT
-    
-    def reverse_diffusion_process(self, latent_shape, encoder_hidden_states, zT = None, unet_input = None):
-        # Not using
-        pass
-    
     def get_loss(self, batch):
         z0, unet_input, noise, encoder_hidden_states = self.pre_process(batch)
         unet_output = self(z0, unet_input, noise, encoder_hidden_states)
@@ -871,61 +1007,6 @@ class stable_diffusion_text_guided_inpainting_vton(Module_base):
             
         return i, c, c_w, i_m, m, p, text, im_name, c_name
         
-    def warpping_cloth(self, cloth, im_mask, pose_map):
-        # TPS parameters prediction
-        # For sake of performance, the TPS parameters are predicted on a low resolution image
-        low_cloth = transforms.functional.resize(cloth, (256, 192),
-                                                 transforms.InterpolationMode.BILINEAR,
-                                                 antialias=True)
-        low_im_mask = transforms.functional.resize(im_mask, (256, 192),
-                                                   transforms.InterpolationMode.BILINEAR,
-                                                   antialias=True)
-        low_pose_map = transforms.functional.resize(pose_map, (256, 192),
-                                                    transforms.InterpolationMode.BILINEAR,
-                                                    antialias=True)
-        agnostic = torch.cat([low_im_mask, low_pose_map], 1)
-        low_grid, _, _, _, _, _, _, _ = self.tps(low_cloth, agnostic)
-
-        # We upsample the grid to the original image size and warp the cloth using the predicted TPS parameters
-        highres_grid = transforms.functional.resize(low_grid.permute(0, 3, 1, 2), size=(cloth.size(2), cloth.size(3)), 
-                               interpolation=transforms.InterpolationMode.BILINEAR, antialias=True).permute(0, 2, 3, 1)
-
-        warped_cloth = nn.functional.grid_sample(cloth, highres_grid, padding_mode='border', align_corners=True)
-        
-        if self.use_cloth_refinement:
-            # Refine the warped cloth using the refinement network
-            warped_cloth = torch.cat([im_mask, pose_map, warped_cloth], 1)
-            warped_cloth = self.refinement(warped_cloth)
-            warped_cloth = warped_cloth.clamp(-1, 1)
-            warped_cloth = warped_cloth
-        
-        return warped_cloth
-    
-    def get_warped_cloth(self, cloth, im_mask, pose_map):
-        if self.use_cloth_warpping:
-            warped_cloth = self.warpping_cloth(cloth, im_mask, pose_map)
-        else:
-            warped_cloth = cloth
-        
-        return warped_cloth
-    
-    def get_text_encoder_input(self, caption, category):
-        if self.use_caption:
-            text = [cap for
-                    cap in caption]
-        else:
-            category_text = {
-                'dresses': 'a dress',
-                'upper_body': 'an upper body garment',
-                'lower_body': 'a lower body garment',
-            }
-            
-            # batch size lenght
-            text = [f'a photo of a model wearing {category_text[ctg]}' for
-                    ctg in category]
-        
-        return text
-    
     def get_tokenized_text(self, text):        
         # Tokenize text ( bsz, 77 )
         tokenized_text = self.tokenizer(text, max_length=self.tokenizer.model_max_length, padding="max_length",
@@ -942,27 +1023,6 @@ class stable_diffusion_text_guided_inpainting_vton(Module_base):
             
         return encoder_hidden_states
      
-    def get_image_log(self, batch, num_sampling):
-        outputs = self.inference(batch, num_sampling)
-
-        return {"real": outputs["real"],
-                "fake": outputs["fake"]}
-        
-    def save_model(self):
-        torch.save(self.unet.state_dict(), self.model_path)
-        
-    def configure_optimizers(self, lr):
-        optim = self.optimizer(self.unet.parameters(), lr)
-        
-        lambda2 = lambda epoch: 0.95 ** epoch
-        
-        scheduler = LambdaLR(optim, lambda2)
-        
-        optimizers = [optim]
-        schedulers = [scheduler]
-        
-        return optimizers, schedulers
-
     def predict(self, batch, save_dir):
         
         topil = transforms.ToPILImage()
@@ -993,7 +1053,7 @@ class stable_diffusion_text_guided_inpainting_vton(Module_base):
             fake_pils[idx].save(os.path.join(out_dir, "fake.png"))
             cloth_pils[idx].save(os.path.join(out_dir, "cloth.png"))
             w_cloth_pils[idx].save(os.path.join(out_dir, "warped_cloth.png"))
-            
+     
 # ToDo
 class stable_diffusion_text_guided_inpainting_vton_with_controlnet(Module_base):
     def __init__(self,
@@ -1325,8 +1385,8 @@ class stable_diffusion_text_guided_inpainting_vton_with_controlnet(Module_base):
             fake_pils[idx].save(os.path.join(out_dir, "fake.png"))
             cloth_pils[idx].save(os.path.join(out_dir, "cloth.png"))
             w_cloth_pils[idx].save(os.path.join(out_dir, "warped_cloth.png"))
-     
-class ladi_vton(Module_base):
+           
+class ladi_vton(Diffusion_VTON_base):
     def __init__(self,
                  optim_target: tuple,
                  criterion_config: tuple,
@@ -1340,15 +1400,8 @@ class ladi_vton(Module_base):
                  model_path = None, # .../unet.ckpt
                  train_resume: bool = False
                  ):        
-        super().__init__(optim_target, criterion_config, model_path, train_resume)
-
-        self.dataset_name = dataset_name
-        self.in_channels = in_channels
-        self.num_inference_steps = num_inference_steps
-        self.use_caption = use_caption
-        self.use_cloth_warpping = use_cloth_warpping
-        self.use_cloth_refinement = use_cloth_refinement
-        self.use_img2img = use_img2img
+        super().__init__(optim_target, criterion_config, model_path, train_resume,
+                         dataset_name, in_channels, num_inference_steps, use_caption, use_cloth_warpping, use_cloth_refinement, use_img2img)
         
         # Ladi-vton params
         self.emasc_int_layers = [1, 2, 3, 4, 5]
@@ -1395,56 +1448,7 @@ class ladi_vton(Module_base):
                                  refinement=self.refinement,
                                  emasc=self.emasc,
                                  inversion_adapter=self.inversion_adapter)
-        
-    def unet_new_in_channels(self):
-        if self.train_resume:
-            if self.unet.config.in_channels != self.unet.conv_in.in_channels:
-                raise ValueError(f"unet conv_in channels[{self.unet.conv_in.in_channels}] and unet config in_channels[{self.unet.config.in_channels}] is different.")
-        else:
-            # 9channels -> 31channels
-            # the posemap has 18 channels, the (encoded) cloth has 4 channels, the standard SD inpaining has 9 channels
-            with torch.no_grad():
-                # Replace the first conv layer of the unet with a new one with the correct number of input channels
-                conv_new = torch.nn.Conv2d(
-                    in_channels=self.in_channels,
-                    out_channels=self.unet.conv_in.out_channels,
-                    kernel_size=3,
-                    padding=1,
-                )
-
-            torch.nn.init.kaiming_normal_(conv_new.weight)  # Initialize new conv layer
-            conv_new.weight.data = conv_new.weight.data * 0.  # Zero-initialize new conv layer
-
-            conv_new.weight.data[:, :9] = self.unet.conv_in.weight.data  # Copy weights from old conv layer
-            conv_new.bias.data = self.unet.conv_in.bias.data  # Copy bias from old conv layer
-            
-            # replace conv layer in unet
-            self.unet.conv_in = conv_new  
-             # update config
-            self.unet.config.in_channels = self.in_channels 
-            self.unet.config["in_channels"] = self.in_channels
-    
-    def training_resume(self):
-        # This method is executed by the pl.LightningModule.
-        if self.train_resume and os.path.exists(self.model_path) and os.path.isfile(self.model_path):
-            print("Unet loaded")
-            self.unet.load_state_dict(torch.load(self.model_path))
          
-    def forward_diffusion_process(self, z0, noise = None, t = None) -> torch.from_numpy:
-        if noise is None:
-            noise = torch.randn(z0.shape, dtype=z0.dtype, device=z0.device)
-        
-        if t is None:
-            t = torch.full((z0.size(0), ), self.scheduler.timesteps[0], dtype=torch.long, device=z0.device)
-            
-        zT = self.scheduler.add_noise(z0, noise, t)
-    
-        return zT
-    
-    def reverse_diffusion_process(self, latent_shape, encoder_hidden_states, zT = None, unet_input = None):
-        # Not using
-        pass
-    
     def get_loss(self, batch):
         z0, unet_input, noise, encoder_hidden_states = self.pre_process(batch)
         unet_output = self(z0, unet_input, noise, encoder_hidden_states)
@@ -1534,61 +1538,6 @@ class ladi_vton(Module_base):
             
         return i, c, c_w, i_m, m, p, text, im_name, c_name
         
-    def warpping_cloth(self, cloth, im_mask, pose_map):
-        # TPS parameters prediction
-        # For sake of performance, the TPS parameters are predicted on a low resolution image
-        low_cloth = transforms.functional.resize(cloth, (256, 192),
-                                                 transforms.InterpolationMode.BILINEAR,
-                                                 antialias=True)
-        low_im_mask = transforms.functional.resize(im_mask, (256, 192),
-                                                   transforms.InterpolationMode.BILINEAR,
-                                                   antialias=True)
-        low_pose_map = transforms.functional.resize(pose_map, (256, 192),
-                                                    transforms.InterpolationMode.BILINEAR,
-                                                    antialias=True)
-        agnostic = torch.cat([low_im_mask, low_pose_map], 1)
-        low_grid, _, _, _, _, _, _, _ = self.tps(low_cloth, agnostic)
-
-        # We upsample the grid to the original image size and warp the cloth using the predicted TPS parameters
-        highres_grid = transforms.functional.resize(low_grid.permute(0, 3, 1, 2), size=(cloth.size(2), cloth.size(3)), 
-                               interpolation=transforms.InterpolationMode.BILINEAR, antialias=True).permute(0, 2, 3, 1)
-
-        warped_cloth = nn.functional.grid_sample(cloth, highres_grid, padding_mode='border', align_corners=True)
-        
-        if self.use_cloth_refinement:
-            # Refine the warped cloth using the refinement network
-            warped_cloth = torch.cat([im_mask, pose_map, warped_cloth], 1)
-            warped_cloth = self.refinement(warped_cloth)
-            warped_cloth = warped_cloth.clamp(-1, 1)
-            warped_cloth = warped_cloth
-        
-        return warped_cloth
-    
-    def get_warped_cloth(self, cloth, im_mask, pose_map):
-        if self.use_cloth_warpping:
-            warped_cloth = self.warpping_cloth(cloth, im_mask, pose_map)
-        else:
-            warped_cloth = cloth
-        
-        return warped_cloth
-    
-    def get_text_encoder_input(self, caption, category):
-        if self.use_caption:
-            text = [cap for
-                    cap in caption]
-        else:
-            category_text = {
-                'dresses': 'a dress',
-                'upper_body': 'an upper body garment',
-                'lower_body': 'a lower body garment',
-            }
-            
-            # batch size lenght
-            text = [f'a photo of a model wearing {category_text[ctg]}' for
-                    ctg in category]
-        
-        return text
-    
     def get_word_embedding(self, image):
         # Get the visual features of the in-shop cloths
         # (bsz, 3, 224, 224)
@@ -1630,27 +1579,6 @@ class ladi_vton(Module_base):
             
         return encoder_hidden_states
      
-    def get_image_log(self, batch, num_sampling):
-        outputs = self.inference(batch, num_sampling)
-
-        return {"real": outputs["real"],
-                "fake": outputs["fake"]}
-                
-    def save_model(self):
-        torch.save(self.unet.state_dict(), self.model_path)
-        
-    def configure_optimizers(self, lr):
-        optim = self.optimizer(self.unet.parameters(), lr)
-        
-        lambda2 = lambda epoch: 0.95 ** epoch
-        
-        scheduler = LambdaLR(optim, lambda2)
-        
-        optimizers = [optim]
-        schedulers = [scheduler]
-        
-        return optimizers, schedulers
-
     def predict(self, batch, save_dir):
         
         topil = transforms.ToPILImage()
@@ -1681,7 +1609,7 @@ class ladi_vton(Module_base):
             fake_pils[idx].save(os.path.join(out_dir, "fake.png"))
             cloth_pils[idx].save(os.path.join(out_dir, "cloth.png"))
             w_cloth_pils[idx].save(os.path.join(out_dir, "warped_cloth.png"))
-            
+     
 # ToDo
 class ladi_vton_with_controlnet(Module_base):
     def __init__(self,

@@ -42,7 +42,7 @@ dataset:
   height: &height 512
   width: &width 384
   num_workers: 6
-  batch_size: 32
+  batch_size: 1
   train:
     target: &data_target dataloader.dresscode.DressCodeDataset
     params:

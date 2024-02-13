@@ -4,25 +4,20 @@ model:
     lr: 0.000001
     sampling_step: 5
     num_sampling: 20
-    save_dir: outputs/ladi_vton/DressCode
+    save_dir: outputs/stable_diffusion_text_guided_inpainting/VITON_HD
     model_config:
-      target: models.vton.ladi_vton
+      target: models.vton.stable_diffusion_text_guided_inpainting
       params:
         optim_target: torch.optim.adamw.AdamW
         criterion_config:
           target: torch.nn.MSELoss
-        dataset_name: dresscode
-        in_channels: 31
         num_inference_steps: 50
-        use_caption: True
-        use_cloth_warpping: True
-        use_cloth_refinement: False
-        use_img2img: False
-        model_path: checkpoints/vton/ladi_vton/DressCode/unet.ckpt
+        use_caption: Ture
+        model_path: checkpoints/vton/stable_diffusion_text_guided_inpainting/VITON_HD/unet.ckpt
         train_resume: False
 
 logger:
-  logger_path: checkpoints/vton/ladi_vton/DressCode/tryon
+  logger_path: checkpoints/vton/stable_diffusion_text_guided_inpainting/VITON_HD/tryon
     
 lightning:
   use_earlystop: False
@@ -49,10 +44,10 @@ dataset:
   num_workers: 6
   batch_size: 1
   train:
-    target: &data_target dataloader.dresscode.DressCodeDataset
+    target: &data_target dataloader.vitonhd.VitonHDDataset
     params:
       size: [*height, *width]
-      dataroot_path: &dataroot_path data/DressCode
+      dataroot_path: &dataroot_path data/VITON_HD
       phase: train
       category: &data_category
       - upper_body
@@ -62,9 +57,6 @@ dataset:
       - c_name
       - im_name
       - image
-      - cloth
-      # - warped_cloth
-      - pose_map
       - inpaint_mask
       - im_mask
       - category
